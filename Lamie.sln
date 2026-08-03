@@ -1,0 +1,55 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36429.23 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.API", "Lamie.API\Lamie.API.csproj", "{7209A40E-EBD7-4181-9C0C-84ACF49CE52F}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.Domain", "Lamie.Domain\Lamie.Domain.csproj", "{8AE090C3-6C98-42DC-B1AF-FCE94157834E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.Application", "Lamie.Application\Lamie.Application.csproj", "{8EE02767-6F79-40C4-B731-B56E616FEBB0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.Infrastructure", "Lamie.Infrastructure\Lamie.Infrastructure.csproj", "{5F559E9B-BBAE-48FD-A53E-53A6D6C2CB5E}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.Shared", "Lamie.Shared\Lamie.Shared.csproj", "{6FCE040A-B1F0-4A00-9914-A81A4C6D22CE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Lamie.Tests", "Lamie.Tests\Lamie.Tests.csproj", "{E140F959-15B7-4B78-93C8-5BC56B665F6A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{7209A40E-EBD7-4181-9C0C-84ACF49CE52F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7209A40E-EBD7-4181-9C0C-84ACF49CE52F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7209A40E-EBD7-4181-9C0C-84ACF49CE52F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7209A40E-EBD7-4181-9C0C-84ACF49CE52F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8AE090C3-6C98-42DC-B1AF-FCE94157834E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8AE090C3-6C98-42DC-B1AF-FCE94157834E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8AE090C3-6C98-42DC-B1AF-FCE94157834E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8AE090C3-6C98-42DC-B1AF-FCE94157834E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{8EE02767-6F79-40C4-B731-B56E616FEBB0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{8EE02767-6F79-40C4-B731-B56E616FEBB0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{8EE02767-6F79-40C4-B731-B56E616FEBB0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{8EE02767-6F79-40C4-B731-B56E616FEBB0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5F559E9B-BBAE-48FD-A53E-53A6D6C2CB5E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5F559E9B-BBAE-48FD-A53E-53A6D6C2CB5E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5F559E9B-BBAE-48FD-A53E-53A6D6C2CB5E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5F559E9B-BBAE-48FD-A53E-53A6D6C2CB5E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{6FCE040A-B1F0-4A00-9914-A81A4C6D22CE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{6FCE040A-B1F0-4A00-9914-A81A4C6D22CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{6FCE040A-B1F0-4A00-9914-A81A4C6D22CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{6FCE040A-B1F0-4A00-9914-A81A4C6D22CE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E140F959-15B7-4B78-93C8-5BC56B665F6A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E140F959-15B7-4B78-93C8-5BC56B665F6A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E140F959-15B7-4B78-93C8-5BC56B665F6A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E140F959-15B7-4B78-93C8-5BC56B665F6A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {02674839-1D36-4A70-8C0D-5431C1E0435D}
+	EndGlobalSection
+EndGlobal

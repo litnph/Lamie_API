@@ -1,0 +1,15 @@
+Lamie.API/bin/
+Lamie.API/obj/
+Lamie.Application/bin/
+Lamie.Application/obj/
+Lamie.Domain/bin/
+Lamie.Domain/obj/
+Lamie.Infrastructure/bin/
+Lamie.Infrastructure/obj/
+Lamie.Shared/obj/
+.vs/
+Lamie.Shared/bin/
+.vscode/
+Lamie.API/wwwroot/uploads/
+Lamie.Tests/bin/
+Lamie.Tests/obj/
