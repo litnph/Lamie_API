@@ -42,7 +42,7 @@ public sealed class ChannelsController : ControllerBase
     }
 
     [HttpDelete("{id:guid}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Policy = PermissionNames.ChannelsManage)]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
         await _channelService.DeleteOrDisableAsync(id, cancellationToken);

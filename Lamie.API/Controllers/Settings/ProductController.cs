@@ -104,7 +104,7 @@ namespace Lamie.API.Controllers
         /// Admin: Xóa sản phẩm
         /// </summary>
         [HttpDelete("{id:int}")]
-        [Authorize(Roles = "Admin")]
+        [Authorize(Policy = PermissionNames.ProductsManage)]
         public async Task<IActionResult> Delete(int id, CancellationToken cancellationToken)
         {
             await _mediator.Send(new DeleteProductCommand(id), cancellationToken);

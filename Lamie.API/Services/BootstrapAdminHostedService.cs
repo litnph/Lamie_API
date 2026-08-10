@@ -45,12 +45,13 @@ public sealed class BootstrapAdminHostedService : IHostedService
             "pending-password-hash",
             _options.FullName,
             null,
-            UserRole.Admin,
+            BuiltInRole.Admin,
             true,
             now);
         var passwordHasher = scope.ServiceProvider.GetRequiredService<IPasswordHasher<User>>();
         user.SetPasswordHash(passwordHasher.HashPassword(user, _options.Password));
         dbContext.Users.Add(user);
+        dbContext.UserRoles.Add(new UserRole(user.Id, Role.AdminId, now));
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 

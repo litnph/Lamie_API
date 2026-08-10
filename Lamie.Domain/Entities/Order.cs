@@ -145,8 +145,12 @@ public sealed class Order
         Guid? actorId,
         string? actorName)
     {
-        if (OrderStatus != OrderStatus.Created || InventoryReserved)
-            throw new DomainException("Only a Created order without reserved inventory can be edited.");
+        if (OrderStatus is OrderStatus.Completed or OrderStatus.Cancelled)
+            throw new DomainException("Không thể chỉnh sửa đơn hàng đã hoàn tất hoặc đã hủy.");
+        if (OrderStatus != OrderStatus.Created)
+            throw new DomainException("Đơn hàng chỉ có thể chỉnh sửa khi ở trạng thái Đã tạo.");
+        if (InventoryReserved)
+            throw new DomainException("Đơn hàng Đã tạo có trạng thái giữ tồn kho không nhất quán. Vui lòng tải lại và liên hệ quản trị viên.");
         if (channelId == Guid.Empty)
             throw new DomainException("Order channel is required.");
         EnsureUtc(nowUtc, "Current time");
@@ -190,6 +194,7 @@ public sealed class Order
 
     public void ChangeStatus(
         OrderStatus target,
+        bool inventoryReservedAfterTransition,
         DateTime nowUtc,
         Guid? actorId,
         string? actorName,
@@ -201,7 +206,7 @@ public sealed class Order
 
         var previous = OrderStatus;
         if (RequiresInventoryReservation(target))
-            InventoryReserved = true;
+            InventoryReserved = inventoryReservedAfterTransition;
         else if (RequiresInventoryRestore(target))
             InventoryReserved = false;
 

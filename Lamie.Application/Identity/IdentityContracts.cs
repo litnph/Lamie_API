@@ -14,15 +14,17 @@ public sealed record CreateUserRequest(
     string Password,
     string FullName,
     string? Phone,
-    UserRole Role,
-    bool IsActive);
+    BuiltInRole Role,
+    bool IsActive,
+    Guid? RoleId = null);
 
 public sealed record UpdateUserRequest(
     Guid Id,
     string FullName,
     string? Phone,
-    UserRole Role,
-    bool IsActive);
+    BuiltInRole Role,
+    bool IsActive,
+    Guid? RoleId = null);
 
 public sealed record AuthTokensDto(
     string AccessToken,
@@ -36,11 +38,14 @@ public sealed record AuthUserDto(
     string UserName,
     string FullName,
     string? Phone,
-    UserRole Role,
+    BuiltInRole Role,
     bool IsActive,
     DateTime? LastLoginAt,
     DateTime CreatedAt,
-    IReadOnlyCollection<string>? Permissions = null);
+    IReadOnlyCollection<string>? Permissions = null,
+    Guid? RoleId = null,
+    string? RoleName = null,
+    string? RoleCode = null);
 
 public sealed record AuthResultDto(AuthUserDto User, AuthTokensDto Tokens);
 
@@ -49,7 +54,10 @@ public sealed record RefreshTokenResult(string Token, string Hash, DateTime Expi
 
 public interface IJwtTokenService
 {
-    AccessTokenResult CreateAccessToken(User user, IEnumerable<string>? permissions = null);
+    AccessTokenResult CreateAccessToken(
+        User user,
+        IEnumerable<string>? permissions = null,
+        string? roleCode = null);
     RefreshTokenResult CreateRefreshToken();
     string HashRefreshToken(string token);
 }

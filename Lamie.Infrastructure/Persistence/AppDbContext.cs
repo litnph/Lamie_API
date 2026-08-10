@@ -1,3 +1,4 @@
+using Lamie.Application.Identity;
 using Lamie.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
@@ -8,6 +9,8 @@ namespace Lamie.Infrastructure.Persistence
     public class AppDbContext : DbContext
     {
         public DbSet<Product> Products => Set<Product>();
+        public DbSet<ExpenseCategory> ExpenseCategories => Set<ExpenseCategory>();
+        public DbSet<Expense> Expenses => Set<Expense>();
         public DbSet<Channel> Channels => Set<Channel>();
         public DbSet<Customer> Customers => Set<Customer>();
         public DbSet<Order> Orders => Set<Order>();
@@ -15,6 +18,12 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<OrderImage> OrderImages => Set<OrderImage>();
         public DbSet<OrderChangeLog> OrderChangeLogs => Set<OrderChangeLog>();
         public DbSet<User> Users => Set<User>();
+        public DbSet<Role> Roles => Set<Role>();
+        public DbSet<Permission> Permissions => Set<Permission>();
+        public DbSet<UserRole> UserRoles => Set<UserRole>();
+        public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+        public DbSet<AdminNavigation> Navigation => Set<AdminNavigation>();
+        public DbSet<AccessAudit> AccessAudits => Set<AccessAudit>();
         public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
         public DbSet<ProductTranslation> ProductTranslations => Set<ProductTranslation>();
         public DbSet<ProductImage> ProductImages => Set<ProductImage>();
@@ -63,6 +72,29 @@ namespace Lamie.Infrastructure.Persistence
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.Entity<ExpenseCategory>(entity =>
+            {
+                entity.ToTable("fin_expense_categories");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Name).HasMaxLength(120);
+                entity.Property(x => x.NormalizedName).HasMaxLength(120);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.HasIndex(x => x.NormalizedName).IsUnique();
+                entity.HasIndex(x => new { x.SortOrder, x.Name });
+            });
+
+            modelBuilder.Entity<Expense>(entity =>
+            {
+                entity.ToTable("fin_expenses");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.ExpenseDate).HasColumnType("date");
+                entity.Property(x => x.Amount).HasPrecision(18, 2);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.Property(x => x.Notes).HasMaxLength(2000);
+                entity.HasIndex(x => x.ExpenseCategoryId);
+                entity.HasIndex(x => new { x.ExpenseDate, x.ExpenseCategoryId });
+            });
+
             modelBuilder.Entity<Channel>(entity =>
             {
                 entity.ToTable("sales_channels");
@@ -98,6 +130,132 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.Status).HasConversion<int>();
                 entity.HasIndex(x => x.NormalizedEmail).IsUnique();
                 entity.HasIndex(x => x.NormalizedUserName).IsUnique();
+            });
+
+            var accessControlSeededAt = new DateTime(2026, 8, 3, 0, 0, 0, DateTimeKind.Utc);
+            modelBuilder.Entity<Role>(entity =>
+            {
+                entity.ToTable("auth_roles");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(80);
+                entity.Property(x => x.Name).HasMaxLength(120);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.HasIndex(x => x.Code).IsUnique();
+                entity.HasIndex(x => new { x.IsActive, x.Name });
+                entity.HasData(
+                    new
+                    {
+                        Id = Role.AdminId,
+                        Code = "admin",
+                        Name = "Quản trị viên",
+                        Description = (string?)"Toàn quyền quản trị hệ thống.",
+                        IsSystem = true,
+                        IsActive = true,
+                        CreatedAt = accessControlSeededAt,
+                        UpdatedAt = accessControlSeededAt
+                    },
+                    new
+                    {
+                        Id = Role.ManagerId,
+                        Code = "manager",
+                        Name = "Quản lý",
+                        Description = (string?)"Quản lý vận hành, cấu hình, chi phí và báo cáo.",
+                        IsSystem = true,
+                        IsActive = true,
+                        CreatedAt = accessControlSeededAt,
+                        UpdatedAt = accessControlSeededAt
+                    },
+                    new
+                    {
+                        Id = Role.StaffId,
+                        Code = "staff",
+                        Name = "Nhân viên",
+                        Description = (string?)"Xử lý nghiệp vụ hàng ngày với quyền quản lý giới hạn.",
+                        IsSystem = true,
+                        IsActive = true,
+                        CreatedAt = accessControlSeededAt,
+                        UpdatedAt = accessControlSeededAt
+                    });
+            });
+
+            modelBuilder.Entity<Permission>(entity =>
+            {
+                entity.ToTable("auth_permissions");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(120);
+                entity.Property(x => x.Name).HasMaxLength(160);
+                entity.Property(x => x.Group).HasMaxLength(120);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.HasIndex(x => x.Code).IsUnique();
+                entity.HasIndex(x => new { x.IsActive, x.Group, x.SortOrder, x.Name });
+                entity.HasData(PermissionNames.Descriptors.Select((descriptor, index) => new
+                {
+                    Id = PermissionNames.IdFor(descriptor.Code),
+                    descriptor.Code,
+                    descriptor.Name,
+                    descriptor.Group,
+                    Description = (string?)descriptor.Description,
+                    IsSystem = true,
+                    IsActive = true,
+                    SortOrder = (index + 1) * 10,
+                    CreatedAt = accessControlSeededAt,
+                    UpdatedAt = accessControlSeededAt
+                }));
+            });
+
+            modelBuilder.Entity<UserRole>(entity =>
+            {
+                entity.ToTable("auth_user_roles");
+                entity.HasKey(x => new { x.UserId, x.RoleId });
+                entity.HasIndex(x => x.UserId).IsUnique();
+                entity.HasIndex(x => x.RoleId);
+            });
+
+            modelBuilder.Entity<RolePermission>(entity =>
+            {
+                entity.ToTable("auth_role_permissions");
+                entity.HasKey(x => new { x.RoleId, x.PermissionId });
+                entity.HasIndex(x => x.PermissionId);
+                var grants = Enum.GetValues<BuiltInRole>()
+                    .SelectMany(role => BuiltInRolePermissionDefaults.Get(role).Select(permissionCode => new
+                    {
+                        RoleId = Role.IdFor(role),
+                        PermissionId = PermissionNames.IdFor(permissionCode),
+                        GrantedAt = accessControlSeededAt
+                    }));
+                entity.HasData(grants);
+            });
+
+            modelBuilder.Entity<AdminNavigation>(entity =>
+            {
+                entity.ToTable("auth_navigation");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Key).HasMaxLength(120);
+                entity.Property(x => x.ModuleKey).HasMaxLength(120);
+                entity.Property(x => x.PageKey).HasMaxLength(160);
+                entity.Property(x => x.Label).HasMaxLength(160);
+                entity.Property(x => x.Description).HasMaxLength(500);
+                entity.Property(x => x.Path).HasMaxLength(400);
+                entity.Property(x => x.IconKey).HasMaxLength(80);
+                entity.Property(x => x.PermissionCode).HasMaxLength(120);
+                entity.HasIndex(x => x.Key).IsUnique();
+                entity.HasIndex(x => new { x.ParentId, x.SortOrder, x.Label });
+                entity.HasIndex(x => x.PermissionCode);
+                entity.HasIndex(x => new { x.ModuleKey, x.PageKey });
+                entity.HasIndex(x => new { x.IsEnabled, x.IsVisible });
+            });
+
+            modelBuilder.Entity<AccessAudit>(entity =>
+            {
+                entity.ToTable("auth_access_audit");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Action).HasMaxLength(80);
+                entity.Property(x => x.EntityType).HasMaxLength(80);
+                entity.Property(x => x.EntityId).HasMaxLength(160);
+                entity.Property(x => x.BeforeJson).HasColumnType("nvarchar(max)");
+                entity.Property(x => x.AfterJson).HasColumnType("nvarchar(max)");
+                entity.HasIndex(x => new { x.EntityType, x.EntityId, x.OccurredAt });
+                entity.HasIndex(x => new { x.ActorUserId, x.OccurredAt });
             });
 
             modelBuilder.Entity<RefreshToken>(entity =>

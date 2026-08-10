@@ -200,6 +200,7 @@ public sealed class OrderService : IOrderService
         await EnsureActiveChannelAsync(form.ChannelId, cancellationToken);
         var snapshots = await ResolveSnapshotsAsync(form.Items, cancellationToken);
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, form.RowVersion);
         var trackedChildren = CaptureTrackedChildren(order);
         var actor = CurrentActor();
         var now = UtcNow();
@@ -250,7 +251,7 @@ public sealed class OrderService : IOrderService
         catch (DbUpdateConcurrencyException)
         {
             await DeleteFilesBestEffortAsync(uploadedUrls);
-            throw new ConflictException("The order was changed by another request. Reload and try again.");
+            throw new ConflictException("Đơn hàng đã được xử lý bởi người khác, vui lòng tải lại.");
         }
         catch
         {
@@ -272,6 +273,7 @@ public sealed class OrderService : IOrderService
         var trackedChildren = CaptureTrackedChildren(order);
         var reserve = order.RequiresInventoryReservation(status);
         var restore = order.RequiresInventoryRestore(status);
+        var inventoryReservedAfterTransition = order.InventoryReserved;
 
         if (reserve || restore)
         {
@@ -283,15 +285,17 @@ public sealed class OrderService : IOrderService
                 .Where(product => quantities.Keys.Contains(product.Id))
                 .ToDictionaryAsync(product => product.Id, cancellationToken);
             if (products.Count != quantities.Count)
-                throw new ConflictException("One or more products referenced by the order no longer exist.");
+                throw new ConflictException("Một hoặc nhiều sản phẩm trong đơn không còn tồn tại.");
 
             foreach (var (productId, quantity) in quantities)
             {
                 var product = products[productId];
                 if (reserve)
                 {
-                    if (!product.IsActive || (product.TracksInventory && product.Stock < quantity))
-                        throw new ConflictException($"Insufficient stock for product '{product.Sku}'.");
+                    if (!product.IsActive)
+                        throw new ConflictException($"Sản phẩm '{product.Sku}' đã ngừng hoạt động.");
+                    if (product.TracksInventory && product.Stock < quantity)
+                        throw new ConflictException($"Sản phẩm '{product.Sku}' không đủ tồn kho: cần {quantity}, hiện còn {product.Stock}.");
                     product.ReserveStock(quantity);
                 }
                 else
@@ -299,9 +303,13 @@ public sealed class OrderService : IOrderService
                     product.RestoreStock(quantity);
                 }
             }
+
+            inventoryReservedAfterTransition = reserve
+                ? products.Values.Any(product => product.TracksInventory)
+                : false;
         }
 
-        order.ChangeStatus(status, UtcNow(), actor.Id, actor.Name);
+        order.ChangeStatus(status, inventoryReservedAfterTransition, UtcNow(), actor.Id, actor.Name);
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -311,7 +319,7 @@ public sealed class OrderService : IOrderService
         catch (DbUpdateConcurrencyException)
         {
             await transaction.RollbackAsync(cancellationToken);
-            throw new ConflictException("Order or inventory changed concurrently. Reload and try again.");
+            throw new ConflictException("Đơn hàng hoặc tồn kho đã thay đổi bởi người khác, vui lòng tải lại.");
         }
     }
 
@@ -332,7 +340,7 @@ public sealed class OrderService : IOrderService
         }
         catch (DbUpdateConcurrencyException)
         {
-            throw new ConflictException("The order was changed by another request. Reload and try again.");
+            throw new ConflictException("Đơn hàng đã được xử lý bởi người khác, vui lòng tải lại.");
         }
     }
 
@@ -352,7 +360,7 @@ public sealed class OrderService : IOrderService
                 .Where(product => quantities.Keys.Contains(product.Id))
                 .ToDictionaryAsync(product => product.Id, cancellationToken);
             if (products.Count != quantities.Count)
-                throw new ConflictException("One or more products referenced by the order no longer exist.");
+                throw new ConflictException("Một hoặc nhiều sản phẩm trong đơn không còn tồn tại.");
             foreach (var (productId, quantity) in quantities)
                 products[productId].RestoreStock(quantity);
         }
@@ -366,7 +374,7 @@ public sealed class OrderService : IOrderService
         catch (DbUpdateConcurrencyException)
         {
             await transaction.RollbackAsync(cancellationToken);
-            throw new ConflictException("The order was changed by another request. Reload and try again.");
+            throw new ConflictException("Đơn hàng đã được xử lý bởi người khác, vui lòng tải lại.");
         }
 
         await DeleteFilesBestEffortAsync(imageUrls);
@@ -482,6 +490,8 @@ public sealed class OrderService : IOrderService
         var skus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in lines)
         {
+            if (line.Quantity <= 0)
+                throw Validation("items", "Số lượng sản phẩm phải là số nguyên lớn hơn 0.");
             if (!string.IsNullOrWhiteSpace(line.ProductId))
             {
                 if (!int.TryParse(line.ProductId, NumberStyles.None, CultureInfo.InvariantCulture, out var productId) || productId <= 0)
@@ -504,7 +514,7 @@ public sealed class OrderService : IOrderService
         foreach (var line in lines)
         {
             if (line.UnitPrice < 0)
-                throw Validation(nameof(line.UnitPrice), "Order item unit price cannot be negative.");
+                throw Validation("items", "Đơn giá sản phẩm không được âm.");
             Product? product = null;
             if (!string.IsNullOrWhiteSpace(line.ProductId))
             {
@@ -520,7 +530,7 @@ public sealed class OrderService : IOrderService
             if (product is not null)
             {
                 if (!product.IsActive)
-                    throw new ConflictException($"Product '{product.Sku}' is inactive.");
+                    throw new ConflictException($"Sản phẩm '{product.Sku}' đã ngừng hoạt động.");
                 var name = product.Translations
                     .OrderByDescending(translation => translation.LanguageCode.Equals("vi", StringComparison.OrdinalIgnoreCase))
                     .ThenBy(translation => translation.LanguageCode)
@@ -539,7 +549,7 @@ public sealed class OrderService : IOrderService
             else
             {
                 if (line.UnitPrice <= 0)
-                    throw Validation(nameof(line.UnitPrice), "Manual item unit price must be greater than zero.");
+                    throw Validation("items", "Đơn giá sản phẩm ngoài danh mục phải lớn hơn 0.");
                 snapshots.Add(new OrderItemSnapshot(
                     null,
                     line.ProductSku,
@@ -664,6 +674,7 @@ public sealed class OrderService : IOrderService
         order.Description,
         order.ContentNote,
         UtcOffset(order.UpdatedAt),
+        order.RowVersion.Length == 0 ? null : Convert.ToBase64String(order.RowVersion),
         order.Items.OrderBy(item => item.Id).Select(item => new OrderItemDto(
             item.Id,
             item.ProductId?.ToString(CultureInfo.InvariantCulture),
@@ -794,6 +805,27 @@ public sealed class OrderService : IOrderService
         order.Items.Select(item => item.Id).ToHashSet(),
         order.Images.Select(image => image.Id).ToHashSet(),
         order.ChangeLogs.Select(log => log.Id).ToHashSet());
+
+    private void ApplyExpectedRowVersion(Order order, string? encodedRowVersion)
+    {
+        if (string.IsNullOrWhiteSpace(encodedRowVersion))
+            return;
+
+        byte[] rowVersion;
+        try
+        {
+            rowVersion = Convert.FromBase64String(encodedRowVersion);
+        }
+        catch (FormatException)
+        {
+            throw Validation(nameof(UpdateOrderForm.RowVersion), "Phiên bản đơn hàng không hợp lệ. Vui lòng tải lại.");
+        }
+
+        if (rowVersion.Length != 8)
+            throw Validation(nameof(UpdateOrderForm.RowVersion), "Phiên bản đơn hàng không hợp lệ. Vui lòng tải lại.");
+
+        _dbContext.Entry(order).Property(item => item.RowVersion).OriginalValue = rowVersion;
+    }
 
     private void TrackAddedChildren(Order order, TrackedOrderChildren tracked)
     {

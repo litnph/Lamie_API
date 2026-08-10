@@ -20,7 +20,10 @@ public sealed class JwtTokenService : IJwtTokenService
         _timeProvider = timeProvider;
     }
 
-    public AccessTokenResult CreateAccessToken(User user, IEnumerable<string>? permissions = null)
+    public AccessTokenResult CreateAccessToken(
+        User user,
+        IEnumerable<string>? permissions = null,
+        string? roleCode = null)
     {
         if (Encoding.UTF8.GetByteCount(_options.SigningKey) < 32)
             throw new InvalidOperationException("Jwt:SigningKey must contain at least 32 bytes.");
@@ -31,7 +34,7 @@ public sealed class JwtTokenService : IJwtTokenService
         {
             [JwtRegisteredClaimNames.Sub] = user.Id.ToString(),
             [JwtRegisteredClaimNames.UniqueName] = user.UserName,
-            ["role"] = user.Role.ToString(),
+            ["role"] = roleCode ?? user.Role.ToString(),
             [JwtRegisteredClaimNames.Iss] = _options.Issuer,
             [JwtRegisteredClaimNames.Aud] = _options.Audience,
             [JwtRegisteredClaimNames.Iat] = EpochTime.GetIntDate(now),

@@ -533,6 +533,110 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.ToTable("crm_customers", (string)null);
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.Expense", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("description");
+
+                    b.Property<Guid>("ExpenseCategoryId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("expense_category_id");
+
+                    b.Property<DateOnly>("ExpenseDate")
+                        .HasColumnType("date")
+                        .HasColumnName("expense_date");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_expenses");
+
+                    b.HasIndex("ExpenseCategoryId")
+                        .HasDatabaseName("ix_fin_expenses_expense_category_id");
+
+                    b.HasIndex("ExpenseDate", "ExpenseCategoryId")
+                        .HasDatabaseName("ix_fin_expenses_expense_date_expense_category_id");
+
+                    b.ToTable("fin_expenses", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ExpenseCategory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("normalized_name");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_expense_categories");
+
+                    b.HasIndex("NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_expense_categories_normalized_name");
+
+                    b.HasIndex("SortOrder", "Name")
+                        .HasDatabaseName("ix_fin_expense_categories_sort_order_name");
+
+                    b.ToTable("fin_expense_categories", (string)null);
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Language", b =>
                 {
                     b.Property<string>("Code")
@@ -1061,6 +1165,203 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_sales_order_items_product_id");
 
                     b.ToTable("sales_order_items", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.Permission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("code");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("description");
+
+                    b.Property<string>("Group")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("group");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)")
+                        .HasColumnName("name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auth_permissions");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_auth_permissions_code");
+
+                    b.HasIndex("Group", "Name")
+                        .HasDatabaseName("ix_auth_permissions_group_name");
+
+                    b.ToTable("auth_permissions", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000001"),
+                            Code = "products.view",
+                            Description = "Xem danh sách và chi tiết sản phẩm.",
+                            Group = "Sản phẩm",
+                            Name = "Xem sản phẩm"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000002"),
+                            Code = "products.manage",
+                            Description = "Tạo và cập nhật sản phẩm.",
+                            Group = "Sản phẩm",
+                            Name = "Quản lý sản phẩm"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000003"),
+                            Code = "orders.view",
+                            Description = "Xem danh sách và chi tiết đơn hàng.",
+                            Group = "Đơn hàng",
+                            Name = "Xem đơn hàng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000004"),
+                            Code = "orders.manage",
+                            Description = "Tạo và cập nhật đơn hàng.",
+                            Group = "Đơn hàng",
+                            Name = "Quản lý đơn hàng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000005"),
+                            Code = "orders.cancel",
+                            Description = "Hủy đơn hàng đang xử lý.",
+                            Group = "Đơn hàng",
+                            Name = "Hủy đơn hàng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000006"),
+                            Code = "customers.view",
+                            Description = "Xem thông tin khách hàng.",
+                            Group = "Khách hàng",
+                            Name = "Xem khách hàng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000007"),
+                            Code = "customers.manage",
+                            Description = "Cập nhật thông tin khách hàng.",
+                            Group = "Khách hàng",
+                            Name = "Quản lý khách hàng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000008"),
+                            Code = "channels.view",
+                            Description = "Xem danh sách kênh bán.",
+                            Group = "Cấu hình",
+                            Name = "Xem kênh bán"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000009"),
+                            Code = "channels.manage",
+                            Description = "Tạo và cập nhật kênh bán.",
+                            Group = "Cấu hình",
+                            Name = "Quản lý kênh bán"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000010"),
+                            Code = "dashboard.view",
+                            Description = "Xem màn hình tổng quan vận hành.",
+                            Group = "Báo cáo",
+                            Name = "Xem tổng quan"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000011"),
+                            Code = "settings.view",
+                            Description = "Xem dữ liệu cấu hình hệ thống.",
+                            Group = "Cấu hình",
+                            Name = "Xem cấu hình"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000012"),
+                            Code = "settings.manage",
+                            Description = "Thay đổi dữ liệu cấu hình hệ thống.",
+                            Group = "Cấu hình",
+                            Name = "Quản lý cấu hình"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000013"),
+                            Code = "expenses.view",
+                            Description = "Xem danh mục và các khoản chi.",
+                            Group = "Tài chính",
+                            Name = "Xem chi phí"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000014"),
+                            Code = "expenses.manage",
+                            Description = "Tạo, cập nhật và xóa chi phí.",
+                            Group = "Tài chính",
+                            Name = "Quản lý chi phí"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000015"),
+                            Code = "reports.view",
+                            Description = "Xem và xuất báo cáo tài chính.",
+                            Group = "Báo cáo",
+                            Name = "Xem báo cáo"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000016"),
+                            Code = "users.view",
+                            Description = "Xem tài khoản quản trị.",
+                            Group = "Phân quyền",
+                            Name = "Xem người dùng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000017"),
+                            Code = "users.manage",
+                            Description = "Tạo, cập nhật và khóa tài khoản.",
+                            Group = "Phân quyền",
+                            Name = "Quản lý người dùng"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000018"),
+                            Code = "roles.view",
+                            Description = "Xem vai trò và quyền được cấp.",
+                            Group = "Phân quyền",
+                            Name = "Xem vai trò"
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000019"),
+                            Code = "roles.manage",
+                            Description = "Tạo, cập nhật và xóa vai trò tùy chỉnh.",
+                            Group = "Phân quyền",
+                            Name = "Quản lý vai trò"
+                        });
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Product", b =>
@@ -1741,6 +2042,383 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.ToTable("auth_refresh_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.Role", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_system");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("name");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_auth_roles");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_auth_roles_code");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("ix_auth_roles_is_active_name");
+
+                    b.ToTable("auth_roles", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = new Guid("20000000-0000-4000-8000-000000000001"),
+                            Code = "admin",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Toàn quyền quản trị hệ thống.",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Quản trị viên",
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("20000000-0000-4000-8000-000000000002"),
+                            Code = "manager",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Quản lý vận hành, cấu hình, chi phí và báo cáo.",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Quản lý",
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("20000000-0000-4000-8000-000000000003"),
+                            Code = "staff",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Xử lý nghiệp vụ hàng ngày với quyền quản lý giới hạn.",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Nhân viên",
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.RolePermission", b =>
+                {
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("role_id");
+
+                    b.Property<Guid>("PermissionId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("permission_id");
+
+                    b.Property<DateTime>("GrantedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("granted_at");
+
+                    b.HasKey("RoleId", "PermissionId")
+                        .HasName("pk_auth_role_permissions");
+
+                    b.HasIndex("PermissionId")
+                        .HasDatabaseName("ix_auth_role_permissions_permission_id");
+
+                    b.ToTable("auth_role_permissions", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000002"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000003"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000004"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000005"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000006"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000007"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000008"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000009"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000010"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000011"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000012"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000013"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000014"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000015"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000016"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000017"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000018"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000019"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000002"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000003"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000004"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000005"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000006"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000007"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000008"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000009"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000010"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000011"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000012"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000013"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000014"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000015"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000003"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000004"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000005"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000006"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000008"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000010"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000011"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000013"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000015"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Style", b =>
                 {
                     b.Property<int>("Id")
@@ -2045,6 +2723,33 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_auth_users_normalized_user_name");
 
                     b.ToTable("auth_users", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.UserRole", b =>
+                {
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("user_id");
+
+                    b.Property<Guid>("RoleId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("role_id");
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("assigned_at");
+
+                    b.HasKey("UserId", "RoleId")
+                        .HasName("pk_auth_user_roles");
+
+                    b.HasIndex("RoleId")
+                        .HasDatabaseName("ix_auth_user_roles_role_id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_auth_user_roles_user_id");
+
+                    b.ToTable("auth_user_roles", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.CategoryTranslation", b =>

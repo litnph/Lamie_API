@@ -2,7 +2,7 @@ using Lamie.Domain.Exceptions;
 
 namespace Lamie.Domain.Entities;
 
-public enum UserRole
+public enum BuiltInRole
 {
     Admin = 1,
     Manager = 2,
@@ -28,7 +28,7 @@ public sealed class User
         string passwordHash,
         string fullName,
         string? phone,
-        UserRole role,
+        BuiltInRole role,
         bool isActive,
         DateTime nowUtc)
     {
@@ -48,7 +48,7 @@ public sealed class User
     public string PasswordHash { get; private set; } = string.Empty;
     public string FullName { get; private set; } = string.Empty;
     public string? Phone { get; private set; }
-    public UserRole Role { get; private set; }
+    public BuiltInRole Role { get; private set; }
     public UserStatus Status { get; private set; }
     public int AccessFailedCount { get; private set; }
     public DateTime? LockoutEnd { get; private set; }
@@ -93,7 +93,7 @@ public sealed class User
         UpdatedAt = nowUtc;
     }
 
-    public void UpdateProfile(string fullName, string? phone, UserRole role, bool isActive, DateTime nowUtc)
+    public void UpdateProfile(string fullName, string? phone, BuiltInRole role, bool isActive, DateTime nowUtc)
     {
         if (string.IsNullOrWhiteSpace(fullName))
             throw new DomainException("Full name is required");

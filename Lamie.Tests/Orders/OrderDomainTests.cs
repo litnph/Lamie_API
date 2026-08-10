@@ -51,27 +51,27 @@ public sealed class OrderDomainTests
         var order = CreateOrder();
 
         Assert.True(order.RequiresInventoryReservation(OrderStatus.Producing));
-        order.ChangeStatus(OrderStatus.Producing, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
         Assert.True(order.InventoryReserved);
         Assert.Throws<DomainException>(() =>
-            order.ChangeStatus(OrderStatus.Completed, Baseline.AddMinutes(2), null, "tester"));
+            order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(2), null, "tester"));
 
-        order.ChangeStatus(OrderStatus.Shipping, Baseline.AddMinutes(3), null, "tester");
-        order.ChangeStatus(OrderStatus.Completed, Baseline.AddMinutes(4), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(4), null, "tester");
 
         Assert.Equal(Baseline.AddMinutes(4), order.CompletedAt);
         Assert.Throws<DomainException>(() =>
-            order.ChangeStatus(OrderStatus.Cancelled, Baseline.AddMinutes(5), null, "tester"));
+            order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(5), null, "tester"));
     }
 
     [Fact]
     public void CancellingReservedOrderMarksInventoryForRestore()
     {
         var order = CreateOrder();
-        order.ChangeStatus(OrderStatus.Producing, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
 
         Assert.True(order.RequiresInventoryRestore(OrderStatus.Cancelled));
-        order.ChangeStatus(OrderStatus.Cancelled, Baseline.AddMinutes(2), null, "tester", "Customer request");
+        order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(2), null, "tester", "Customer request");
 
         Assert.False(order.InventoryReserved);
         Assert.Equal(Baseline.AddMinutes(2), order.CancelledAt);
@@ -118,10 +118,114 @@ public sealed class OrderDomainTests
     }
 
     [Fact]
+    public void MadeToOrderTransitionDoesNotClaimAnInventoryReservation()
+    {
+        var order = CreateOrder(items: [new OrderItemSnapshot(1, "CUSTOM-01", "Made to order bouquet", null, 500, 1)]);
+
+        order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(1), null, "tester");
+
+        Assert.Equal(OrderStatus.Producing, order.OrderStatus);
+        Assert.False(order.InventoryReserved);
+        Assert.False(order.RequiresInventoryRestore(OrderStatus.Cancelled));
+    }
+
+    [Fact]
+    public void CreatedOrderUpdatesCustomerDeliveryItemsAndServerTotals()
+    {
+        var order = CreateOrder();
+        var itemId = order.Items.Single().Id;
+        var details = CreateDetails() with
+        {
+            OrdererName = "Updated orderer",
+            OrdererPhone = "0987654321",
+            RecipientName = "Updated recipient",
+            RecipientPhone = "0909123456",
+            DeliveryAddress = "456 Updated Street",
+            DeliveryAddressDescription = "Blue gate",
+            DeliveryAtUtc = Baseline.AddDays(2),
+            DeliveryToUtc = Baseline.AddDays(2).AddHours(2),
+            DepositAmount = 100,
+            ShippingFee = 25,
+            Description = "Updated delivery information",
+            ContentNote = "Preserve this order note"
+        };
+
+        order.Update(
+            Channel.AdminId,
+            null,
+            details,
+            [new OrderItemUpdate(itemId, new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 150, 2, Note: "Use white paper"))],
+            Baseline.AddMinutes(1),
+            null,
+            "tester");
+
+        Assert.Equal(OrderStatus.Created, order.OrderStatus);
+        Assert.False(order.InventoryReserved);
+        Assert.Equal("Updated orderer", order.OrdererName);
+        Assert.Equal("Updated recipient", order.RecipientName);
+        Assert.Equal("456 Updated Street", order.DeliveryAddress);
+        Assert.Equal("Blue gate", order.DeliveryAddressDescription);
+        Assert.Equal(details.DeliveryAtUtc, order.DeliveryAt);
+        Assert.Equal(details.DeliveryToUtc, order.DeliveryTo);
+        Assert.Equal("Preserve this order note", order.ContentNote);
+        Assert.Equal("Use white paper", order.Items.Single().Note);
+        Assert.Equal(300, order.SubTotal);
+        Assert.Equal(325, order.TotalAmount);
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.Completed)]
+    [InlineData(OrderStatus.Cancelled)]
+    public void TerminalOrderCannotBeEdited(OrderStatus terminalStatus)
+    {
+        var order = CreateOrder();
+        if (terminalStatus == OrderStatus.Completed)
+        {
+            order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
+            order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(2), null, "tester");
+            order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(3), null, "tester");
+        }
+        else
+        {
+            order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(1), null, "tester");
+        }
+
+        var exception = Assert.Throws<DomainException>(() => order.Update(
+            Channel.AdminId,
+            null,
+            CreateDetails(),
+            [new OrderItemUpdate(order.Items.Single().Id, new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 100, 1))],
+            Baseline.AddMinutes(4),
+            null,
+            "tester"));
+
+        Assert.Contains("đã hoàn tất hoặc đã hủy", exception.Message);
+    }
+
+    [Fact]
+    public void InvalidUpdateQuantityIsRejectedBeforeExistingItemIsMutated()
+    {
+        var order = CreateOrder();
+        var item = order.Items.Single();
+
+        Assert.Throws<DomainException>(() => order.Update(
+            Channel.AdminId,
+            null,
+            CreateDetails(),
+            [new OrderItemUpdate(item.Id, new OrderItemSnapshot(1, "ROSE-01", "Changed name", null, 100, 0))],
+            Baseline.AddMinutes(1),
+            null,
+            "tester"));
+
+        Assert.Equal("Rose bouquet", item.ProductName);
+        Assert.Equal(1, item.Quantity);
+    }
+
+    [Fact]
     public void ReservedOrderCannotBeEdited()
     {
         var order = CreateOrder();
-        order.ChangeStatus(OrderStatus.Producing, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
 
         Assert.Throws<DomainException>(() => order.Update(
             Channel.AdminId,

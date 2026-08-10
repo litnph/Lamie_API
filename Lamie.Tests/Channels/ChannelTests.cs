@@ -70,7 +70,7 @@ public sealed class ChannelTests
         var deletePolicy = Assert.Single(
             typeof(ChannelsController).GetMethod(nameof(ChannelsController.Delete))!
                 .GetCustomAttributes(typeof(AuthorizeAttribute), true)) as AuthorizeAttribute;
-        Assert.Equal(nameof(UserRole.Admin), deletePolicy?.Roles);
+        Assert.Equal(PermissionNames.ChannelsManage, deletePolicy?.Policy);
     }
 
     [Fact]

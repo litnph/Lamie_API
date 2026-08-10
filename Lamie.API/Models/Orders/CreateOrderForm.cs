@@ -35,6 +35,7 @@ public sealed class CreateOrderImageForm
 public sealed class UpdateOrderForm
 {
     public Guid Id { get; init; }
+    public string? RowVersion { get; init; }
     public string OrdererName { get; init; } = string.Empty;
     public string? OrdererPhone { get; init; }
     public Guid ChannelId { get; init; }

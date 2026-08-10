@@ -78,6 +78,7 @@ public sealed record OrderDetailDto(
     string? Description,
     string? ContentNote,
     DateTimeOffset UpdatedAt,
+    string? RowVersion,
     IReadOnlyList<OrderItemDto> Items,
     IReadOnlyList<OrderImageDto> Images,
     IReadOnlyList<OrderChangeLogDto> ChangeLogs);

@@ -13,3 +13,4 @@ Lamie.Shared/bin/
 Lamie.API/wwwroot/uploads/
 Lamie.Tests/bin/
 Lamie.Tests/obj/
+Lamie.API/appsettings.Production.json

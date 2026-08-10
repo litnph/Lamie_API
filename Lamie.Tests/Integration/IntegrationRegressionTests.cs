@@ -91,7 +91,7 @@ public sealed class IntegrationRegressionTests
 
         var migrations = dbContext.Database.GetMigrations().ToArray();
 
-        Assert.Equal(12, migrations.Length);
+        Assert.Equal(17, migrations.Length);
         Assert.Equal(migrations.OrderBy(value => value, StringComparer.Ordinal), migrations);
         Assert.Contains(migrations, value => value.EndsWith("_AddIdentity", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddChannels", StringComparison.Ordinal));
@@ -101,7 +101,12 @@ public sealed class IntegrationRegressionTests
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderImageItemLink", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_RemoveAllForeignKeyConstraints", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderDeliveryWindow", StringComparison.Ordinal));
-        Assert.EndsWith("_AddProvinceShipping", migrations[^1], StringComparison.Ordinal);
+        Assert.Contains(migrations, value => value.EndsWith("_AddProvinceShipping", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddExpenseModule", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddRolePermissionModel", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddDynamicPermissionFoundation", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddNavigationBackend", StringComparison.Ordinal));
+        Assert.EndsWith("_SeedDefaultAdminNavigation", migrations[^1], StringComparison.Ordinal);
     }
 
     [Fact]

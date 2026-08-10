@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Identity;
@@ -16,19 +17,28 @@ public sealed class IdentityService : IIdentityService
     private readonly IJwtTokenService _tokenService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly TimeProvider _timeProvider;
+    private readonly IUserPermissionResolver _permissionResolver;
+    private readonly IAccessControlCache _accessControlCache;
+    private readonly IAccessAuditWriter _auditWriter;
 
     public IdentityService(
         AppDbContext dbContext,
         IPasswordHasher<User> passwordHasher,
         IJwtTokenService tokenService,
         IHttpContextAccessor httpContextAccessor,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IUserPermissionResolver permissionResolver,
+        IAccessControlCache accessControlCache,
+        IAccessAuditWriter auditWriter)
     {
         _dbContext = dbContext;
         _passwordHasher = passwordHasher;
         _tokenService = tokenService;
         _httpContextAccessor = httpContextAccessor;
         _timeProvider = timeProvider;
+        _permissionResolver = permissionResolver;
+        _accessControlCache = accessControlCache;
+        _auditWriter = auditWriter;
     }
 
     public async Task<AuthResultDto> LoginAsync(
@@ -101,27 +111,30 @@ public sealed class IdentityService : IIdentityService
             throw new UnauthorizedException("Invalid refresh token.");
         }
 
+        var authorization = await GetAuthorizationAsync(existing.User, cancellationToken);
         var nextRefresh = _tokenService.CreateRefreshToken();
         existing.Revoke(now, ipAddress, nextRefresh.Hash);
-        var replacement = new RefreshToken(
+        _dbContext.RefreshTokens.Add(new RefreshToken(
             existing.UserId,
             nextRefresh.Hash,
             now,
             nextRefresh.ExpiresAt,
-            ipAddress);
-        _dbContext.RefreshTokens.Add(replacement);
+            ipAddress));
 
-        var access = _tokenService.CreateAccessToken(existing.User, RolePermissions.Get(existing.User.Role));
+        var access = _tokenService.CreateAccessToken(
+            existing.User,
+            authorization.PermissionCodes,
+            authorization.RoleCode);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return new AuthResultDto(
-            ToDto(existing.User),
+            ToDto(existing.User, authorization),
             new AuthTokensDto(access.Token, access.ExpiresAt, nextRefresh.Token, nextRefresh.ExpiresAt));
     }
 
     public async Task<AuthUserDto> GetCurrentUserAsync(CancellationToken cancellationToken)
     {
         var user = await GetCurrentUserEntityAsync(cancellationToken);
-        return ToDto(user);
+        return ToDto(user, await GetAuthorizationAsync(user, cancellationToken));
     }
 
     public async Task LogoutAsync(
@@ -161,29 +174,43 @@ public sealed class IdentityService : IIdentityService
 
     public async Task<IReadOnlyList<AuthUserDto>> GetUsersAsync(CancellationToken cancellationToken)
     {
-        return await _dbContext.Users
+        var users = await _dbContext.Users
             .AsNoTracking()
             .OrderBy(user => user.FullName)
             .ThenBy(user => user.Email)
-            .Select(user => new AuthUserDto(
+            .ToListAsync(cancellationToken);
+        var assignments = await (
+                from userRole in _dbContext.UserRoles.AsNoTracking()
+                join role in _dbContext.Roles.AsNoTracking() on userRole.RoleId equals role.Id
+                select new { userRole.UserId, Role = role })
+            .ToDictionaryAsync(item => item.UserId, cancellationToken);
+
+        return users.Select(user =>
+        {
+            assignments.TryGetValue(user.Id, out var assignment);
+            var roleId = assignment?.Role.Id ?? Role.IdFor(user.Role);
+            return new AuthUserDto(
                 user.Id,
                 user.Email,
                 user.UserName,
                 user.FullName,
                 user.Phone,
                 user.Role,
-                user.Status == UserStatus.Active,
+                user.IsActive,
                 user.LastLoginAt,
                 user.CreatedAt,
-                null))
-            .ToListAsync(cancellationToken);
+                null,
+                roleId,
+                assignment?.Role.Name ?? user.Role.ToString(),
+                assignment?.Role.Code ?? user.Role.ToString().ToLowerInvariant());
+        }).ToList();
     }
 
     public async Task<AuthUserDto> GetUserAsync(Guid id, CancellationToken cancellationToken)
     {
         var user = await _dbContext.Users.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException("User", id);
-        return ToDto(user);
+        return ToDto(user, await GetAuthorizationAsync(user, cancellationToken));
     }
 
     public async Task<AuthUserDto> CreateUserAsync(CreateUserRequest request, CancellationToken cancellationToken)
@@ -193,6 +220,7 @@ public sealed class IdentityService : IIdentityService
         ValidateRequired(request.FullName, nameof(request.FullName));
         ValidatePassword(request.Password, nameof(request.Password));
         ValidateRole(request.Role);
+        var selectedRole = await ResolveRoleAsync(request.RoleId, request.Role, cancellationToken);
 
         var normalizedEmail = User.Normalize(request.Email);
         var normalizedUserName = User.Normalize(request.UserName);
@@ -208,11 +236,18 @@ public sealed class IdentityService : IIdentityService
             "pending-password-hash",
             request.FullName,
             request.Phone,
-            request.Role,
+            Role.LegacyValueFor(selectedRole.Id),
             request.IsActive,
             now);
         user.SetPasswordHash(_passwordHasher.HashPassword(user, request.Password));
         _dbContext.Users.Add(user);
+        _dbContext.UserRoles.Add(new UserRole(user.Id, selectedRole.Id, now));
+        _auditWriter.Record(
+            "assign",
+            "UserRole",
+            user.Id.ToString(),
+            null,
+            new { UserId = user.Id, RoleId = selectedRole.Id });
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
@@ -222,7 +257,8 @@ public sealed class IdentityService : IIdentityService
             throw new ConflictException("Email or username is already in use.");
         }
 
-        return ToDto(user);
+        _accessControlCache.InvalidateUser(user.Id);
+        return ToDto(user, await GetAuthorizationAsync(user, cancellationToken));
     }
 
     public async Task UpdateUserAsync(Guid id, UpdateUserRequest request, CancellationToken cancellationToken)
@@ -232,26 +268,80 @@ public sealed class IdentityService : IIdentityService
         ValidateRequired(request.FullName, nameof(request.FullName));
         ValidateRole(request.Role);
 
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
         var user = await _dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException("User", id);
-        if (user.Id == GetCurrentUserId() && !request.IsActive)
+        var currentUserId = GetCurrentUserId();
+        if (user.Id == currentUserId && !request.IsActive)
             throw new ConflictException("You cannot disable your own account.");
 
-        user.UpdateProfile(request.FullName, request.Phone, request.Role, request.IsActive, UtcNow());
-        if (!request.IsActive)
-            await RevokeAllTokensAsync(user.Id, UtcNow(), null, cancellationToken);
+        var selectedRole = await ResolveRoleAsync(request.RoleId, request.Role, cancellationToken);
+        var assignment = await _dbContext.UserRoles.SingleOrDefaultAsync(item => item.UserId == id, cancellationToken);
+        var currentRoleId = assignment?.RoleId ?? Role.IdFor(user.Role);
+        if (user.Id == currentUserId && currentRoleId != selectedRole.Id)
+            throw new ConflictException("You cannot change your own role.");
+        if (currentRoleId == Role.AdminId && (selectedRole.Id != Role.AdminId || !request.IsActive))
+            await EnsureAnotherActiveAdministratorAsync(user.Id, cancellationToken);
+
+        var now = UtcNow();
+        user.UpdateProfile(
+            request.FullName,
+            request.Phone,
+            Role.LegacyValueFor(selectedRole.Id),
+            request.IsActive,
+            now);
+        if (assignment is null)
+        {
+            _dbContext.UserRoles.Add(new UserRole(id, selectedRole.Id, now));
+            _auditWriter.Record(
+                "assign",
+                "UserRole",
+                id.ToString(),
+                null,
+                new { UserId = id, RoleId = selectedRole.Id });
+        }
+        else if (assignment.RoleId != selectedRole.Id)
+        {
+            var previousRoleId = assignment.RoleId;
+            _dbContext.UserRoles.Remove(assignment);
+            _dbContext.UserRoles.Add(new UserRole(id, selectedRole.Id, now));
+            _auditWriter.Record(
+                "assign",
+                "UserRole",
+                id.ToString(),
+                new { UserId = id, RoleId = previousRoleId },
+                new { UserId = id, RoleId = selectedRole.Id });
+        }
+
+        if (!request.IsActive || currentRoleId != selectedRole.Id)
+            await RevokeAllTokensAsync(user.Id, now, null, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        _accessControlCache.InvalidateUser(user.Id);
     }
 
     public async Task DisableUserAsync(Guid id, string? ipAddress, CancellationToken cancellationToken)
     {
         if (id == GetCurrentUserId())
             throw new ConflictException("You cannot disable your own account.");
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable,
+            cancellationToken);
         var user = await _dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new NotFoundException("User", id);
+        var assignedRoleId = await _dbContext.UserRoles
+            .Where(item => item.UserId == id)
+            .Select(item => (Guid?)item.RoleId)
+            .SingleOrDefaultAsync(cancellationToken);
+        if ((assignedRoleId ?? Role.IdFor(user.Role)) == Role.AdminId)
+            await EnsureAnotherActiveAdministratorAsync(user.Id, cancellationToken);
         user.UpdateProfile(user.FullName, user.Phone, user.Role, false, UtcNow());
         await RevokeAllTokensAsync(user.Id, UtcNow(), ipAddress, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        _accessControlCache.InvalidateUser(user.Id);
     }
 
     public async Task ResetPasswordAsync(
@@ -274,13 +364,36 @@ public sealed class IdentityService : IIdentityService
         CancellationToken cancellationToken)
     {
         var now = UtcNow();
-        var access = _tokenService.CreateAccessToken(user, RolePermissions.Get(user.Role));
+        var authorization = await GetAuthorizationAsync(user, cancellationToken);
+        var access = _tokenService.CreateAccessToken(user, authorization.PermissionCodes, authorization.RoleCode);
         var refresh = _tokenService.CreateRefreshToken();
         _dbContext.RefreshTokens.Add(new RefreshToken(user.Id, refresh.Hash, now, refresh.ExpiresAt, ipAddress));
         await _dbContext.SaveChangesAsync(cancellationToken);
         return new AuthResultDto(
-            ToDto(user),
+            ToDto(user, authorization),
             new AuthTokensDto(access.Token, access.ExpiresAt, refresh.Token, refresh.ExpiresAt));
+    }
+
+    private async Task<AuthorizationSnapshot> GetAuthorizationAsync(
+        User user,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = await _permissionResolver.ResolveAsync(user.Id, cancellationToken);
+        return new AuthorizationSnapshot(
+            snapshot.RoleId,
+            snapshot.RoleCode,
+            snapshot.RoleName,
+            snapshot.PermissionCodes);
+    }
+
+    private async Task<Role> ResolveRoleAsync(
+        Guid? requestedRoleId,
+        BuiltInRole legacyRole,
+        CancellationToken cancellationToken)
+    {
+        var roleId = requestedRoleId ?? Role.IdFor(legacyRole);
+        return await _dbContext.Roles.SingleOrDefaultAsync(role => role.Id == roleId && role.IsActive, cancellationToken)
+            ?? throw Validation(nameof(requestedRoleId), "Role does not exist or is inactive.");
     }
 
     private async Task<User> GetCurrentUserEntityAsync(CancellationToken cancellationToken)
@@ -313,9 +426,25 @@ public sealed class IdentityService : IIdentityService
             token.Revoke(now, ipAddress);
     }
 
+    private async Task EnsureAnotherActiveAdministratorAsync(
+        Guid excludedUserId,
+        CancellationToken cancellationToken)
+    {
+        var hasAnotherAdministrator = await _dbContext.Users.AsNoTracking().AnyAsync(
+            candidate => candidate.Id != excludedUserId
+                && candidate.Status == UserStatus.Active
+                && (_dbContext.UserRoles.Any(assignment =>
+                        assignment.UserId == candidate.Id && assignment.RoleId == Role.AdminId)
+                    || (!_dbContext.UserRoles.Any(assignment => assignment.UserId == candidate.Id)
+                        && candidate.Role == BuiltInRole.Admin)),
+            cancellationToken);
+        if (!hasAnotherAdministrator)
+            throw new ConflictException("The final active administrator account cannot be disabled or reassigned.");
+    }
+
     private DateTime UtcNow() => _timeProvider.GetUtcNow().UtcDateTime;
 
-    private static AuthUserDto ToDto(User user) => new(
+    private static AuthUserDto ToDto(User user, AuthorizationSnapshot authorization) => new(
         user.Id,
         user.Email,
         user.UserName,
@@ -325,7 +454,10 @@ public sealed class IdentityService : IIdentityService
         user.IsActive,
         user.LastLoginAt,
         user.CreatedAt,
-        RolePermissions.Get(user.Role));
+        authorization.PermissionCodes,
+        authorization.RoleId,
+        authorization.RoleName,
+        authorization.RoleCode);
 
     private static void ValidateRequired(string? value, string field)
     {
@@ -340,7 +472,7 @@ public sealed class IdentityService : IIdentityService
             throw Validation(nameof(email), "Email is invalid.");
     }
 
-    private static void ValidateRole(UserRole role)
+    private static void ValidateRole(BuiltInRole role)
     {
         if (!Enum.IsDefined(role))
             throw Validation(nameof(role), "Role is invalid.");
@@ -363,4 +495,10 @@ public sealed class IdentityService : IIdentityService
 
     private static ValidationException Validation(string field, string message) =>
         new(new Dictionary<string, string[]> { [field] = [message] });
+
+    private sealed record AuthorizationSnapshot(
+        Guid RoleId,
+        string RoleCode,
+        string RoleName,
+        IReadOnlyCollection<string> PermissionCodes);
 }

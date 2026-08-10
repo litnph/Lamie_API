@@ -25,6 +25,16 @@ public sealed class OrderApiContractTests
     }
 
     [Fact]
+    public void UpdateAcceptsAnOptionalRowVersionForBackwardCompatibleConcurrencyChecks()
+    {
+        var property = typeof(UpdateOrderForm).GetProperty(nameof(UpdateOrderForm.RowVersion));
+
+        Assert.NotNull(property);
+        Assert.Equal(typeof(string), property!.PropertyType);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property).WriteState);
+    }
+
+    [Fact]
     public void ControllerExposesNineFrontendRoutesWithExpectedPolicies()
     {
         var controllerPolicy = Assert.Single(

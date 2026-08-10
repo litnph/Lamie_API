@@ -59,7 +59,7 @@ public sealed class IdentityDomainTests
         var jwt = new JwtSecurityTokenHandler().ReadJwtToken(result.Token);
 
         Assert.Contains(jwt.Claims, claim => claim.Type == JwtRegisteredClaimNames.Sub && claim.Value == user.Id.ToString());
-        Assert.Equal(nameof(UserRole.Admin), jwt.Payload["role"]?.ToString());
+        Assert.Equal(nameof(BuiltInRole.Admin), jwt.Payload["role"]?.ToString());
         Assert.Contains(jwt.Claims, claim => claim.Type == "permission" && claim.Value == PermissionNames.ProductsView);
         Assert.Contains(jwt.Claims, claim => claim.Type == "permission" && claim.Value == PermissionNames.UsersManage);
     }
@@ -70,7 +70,7 @@ public sealed class IdentityDomainTests
         "not-a-plaintext-password",
         "Lamie Admin",
         null,
-        UserRole.Admin,
+        BuiltInRole.Admin,
         true,
         Baseline);
 }
