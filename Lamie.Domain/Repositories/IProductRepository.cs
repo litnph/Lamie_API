@@ -15,5 +15,7 @@ namespace Lamie.Domain.Repositories
         Task UpdateAsync(Product product);
         Task DeleteAsync(Product product);
         Task<bool> HasOrderReferencesAsync(int productId, CancellationToken cancellationToken = default);
+        Task<bool> SkuExistsAsync(string sku, int? excludingProductId = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult(false);
     }
 }

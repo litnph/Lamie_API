@@ -13,8 +13,8 @@ namespace Lamie.Application.Settings.Products.Commands
         public CreateProductValidator()
         {
             RuleFor(x => x.Sku)
-                .NotEmpty()
-                .MaximumLength(50);
+                .Must(sku => string.IsNullOrWhiteSpace(sku) || Lamie.Domain.Products.ProductSku.IsValidNewSku(Lamie.Domain.Products.ProductSku.Normalize(sku)))
+                .WithMessage("SKU must be exactly four uppercase letters or digits when supplied.");
 
             RuleFor(x => x.Price)
                 .GreaterThan(0);

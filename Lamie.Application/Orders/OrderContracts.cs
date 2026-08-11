@@ -11,7 +11,12 @@ public sealed record OrderItemDto(
     decimal UnitPrice,
     int Quantity,
     decimal LineTotal,
-    string? Note);
+    string? Note,
+    bool HasCard,
+    string? CardMessage,
+    bool HasBanner,
+    string? BannerMessage,
+    IReadOnlyList<OrderImageDto> Images);
 
 public sealed record OrderImageDto(Guid Id, Guid? OrderItemId, string ImageUrl, int SortOrder, string? Description);
 
@@ -155,6 +160,10 @@ public sealed class OrderLineRequest
     public decimal UnitPrice { get; init; }
     public int Quantity { get; init; }
     public string? Note { get; init; }
+    public bool HasCard { get; init; }
+    public string? CardMessage { get; init; }
+    public bool HasBanner { get; init; }
+    public string? BannerMessage { get; init; }
 }
 
 public sealed record ChangeOrderStatusRequest(OrderStatus Status);

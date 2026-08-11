@@ -12,7 +12,7 @@ namespace Lamie.Application.Settings.Products.Commands
 
             RuleFor(x => x.Sku)
                 .NotEmpty()
-                .MaximumLength(50);
+                .MaximumLength(100);
 
             RuleFor(x => x.Price)
                 .GreaterThan(0);
@@ -82,4 +82,3 @@ namespace Lamie.Application.Settings.Products.Commands
         }
     }
 }
-

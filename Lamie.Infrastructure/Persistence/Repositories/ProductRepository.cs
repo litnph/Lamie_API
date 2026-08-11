@@ -77,5 +77,10 @@ namespace Lamie.Infrastructure.Persistence.Repositories
             _context.OrderItems
                 .AsNoTracking()
                 .AnyAsync(item => item.ProductId == productId, cancellationToken);
+
+        public Task<bool> SkuExistsAsync(string sku, int? excludingProductId = null, CancellationToken cancellationToken = default) =>
+            _context.Products.AsNoTracking().AnyAsync(
+                product => product.Sku == sku && (!excludingProductId.HasValue || product.Id != excludingProductId.Value),
+                cancellationToken);
     }
 }

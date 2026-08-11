@@ -4,6 +4,8 @@ using Lamie.Application.Common.Persistence;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Repositories;
 using MediatR;
+using Lamie.Domain.Products;
+using Lamie.Application.Common.Uploads;
 
 namespace Lamie.Application.Settings.Products.Commands;
 
@@ -28,6 +30,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
 
     public async Task<int> Handle(CreateProductCommand command, CancellationToken cancellationToken)
     {
+        command.Sku = await ResolveSkuAsync(command.Sku, cancellationToken);
         var productType = await _productTypeRepository.GetByIdAsync(command.ProductTypeId);
         if (productType is null || !productType.IsActive)
             throw new ValidationException(new Dictionary<string, string[]>
@@ -83,7 +86,8 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             if (command.ThumbnailFile is { Length: > 0 })
             {
                 var objectPath = BuildProductObjectPath(command.Sku, command.ThumbnailFile.FileName, "thumbnail");
-                await using var stream = command.ThumbnailFile.OpenReadStream();
+                await using var source = command.ThumbnailFile.OpenReadStream();
+                await using var stream = await ProductImageWatermarker.ApplyAsync(source, command.Sku, command.ThumbnailFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,
@@ -113,6 +117,30 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
         }
     }
 
+    private async Task<string> ResolveSkuAsync(string? requested, CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(requested))
+        {
+            var normalized = ProductSku.Normalize(requested);
+            if (!ProductSku.IsValidNewSku(normalized))
+                throw new ValidationException(new Dictionary<string, string[]> { ["sku"] = ["SKU must be exactly four uppercase letters or digits."] });
+            if (await _repository.SkuExistsAsync(normalized, cancellationToken: cancellationToken))
+                throw new ValidationException(new Dictionary<string, string[]> { ["sku"] = ["SKU already exists."] });
+            return normalized;
+        }
+
+        try
+        {
+            return await ProductSku.GenerateUniqueAsync(
+                (candidate, token) => _repository.SkuExistsAsync(candidate, cancellationToken: token),
+                cancellationToken);
+        }
+        catch (InvalidOperationException)
+        {
+            throw new ConflictException("A unique four-character SKU could not be generated. Please retry.");
+        }
+    }
+
     private async Task AddImagesAsync(
         Product product,
         CreateProductCommand command,
@@ -125,7 +153,8 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             if (image.ImageFile is { Length: > 0 })
             {
                 var objectPath = BuildProductObjectPath(command.Sku, image.ImageFile.FileName, $"image-{index}");
-                await using var stream = image.ImageFile.OpenReadStream();
+                await using var source = image.ImageFile.OpenReadStream();
+                await using var stream = await ProductImageWatermarker.ApplyAsync(source, command.Sku, image.ImageFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,

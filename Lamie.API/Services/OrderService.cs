@@ -7,6 +7,7 @@ using Lamie.Application.Common.Storage;
 using Lamie.Application.Common.Uploads;
 using Lamie.Application.Orders;
 using Lamie.Domain.Entities;
+using Lamie.Domain.Orders;
 using Lamie.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -132,7 +133,7 @@ public sealed class OrderService : IOrderService
             orderCode,
             channelId,
             customer?.Id,
-            ToDetails(form),
+            ToDetails(form, snapshots),
             snapshots,
             now,
             actor.Id,
@@ -544,7 +545,11 @@ public sealed class OrderService : IOrderService
                     line.UnitPrice > 0 ? line.UnitPrice : product.SalePrice ?? product.Price,
                     line.Quantity,
                     0,
-                    line.Note));
+                    line.Note,
+                    line.HasCard,
+                    line.CardMessage,
+                    line.HasBanner,
+                    line.BannerMessage));
             }
             else
             {
@@ -558,7 +563,11 @@ public sealed class OrderService : IOrderService
                     line.UnitPrice,
                     line.Quantity,
                     0,
-                    line.Note));
+                    line.Note,
+                    line.HasCard,
+                    line.CardMessage,
+                    line.HasBanner,
+                    line.BannerMessage));
             }
         }
 
@@ -577,7 +586,12 @@ public sealed class OrderService : IOrderService
         throw new ConflictException("A unique order code could not be generated. Please retry.");
     }
 
-    private static OrderDetails ToDetails(CreateOrderForm form) => new(
+    private static OrderDetails ToDetails(CreateOrderForm form, IReadOnlyCollection<OrderItemSnapshot> items)
+    {
+        var shippingFee = form.PickupAtShop ? 0 : form.ShippingFee;
+        var orderValue = items.Sum(item => item.UnitPrice * item.Quantity - item.DiscountAmount) + shippingFee;
+        var deposit = DefaultDepositCalculator.Resolve(orderValue, form.DepositAmount);
+        return new(
         form.OrdererName,
         form.OrdererPhone ?? string.Empty,
         form.RecipientName,
@@ -590,11 +604,12 @@ public sealed class OrderService : IOrderService
         form.DeliveryLongitude,
         form.DeliveryAt.UtcDateTime,
         form.DeliveryTo?.UtcDateTime,
-        form.DepositAmount,
+        deposit,
         form.ShippingFee,
         null,
         form.Description,
         form.ContentNote);
+    }
 
     private static OrderDetails ToDetails(UpdateOrderForm form) => new(
         form.OrdererName,
@@ -684,7 +699,13 @@ public sealed class OrderService : IOrderService
             item.UnitPrice,
             item.Quantity,
             item.LineTotal,
-            item.Note)).ToList(),
+            item.Note,
+            item.HasCard,
+            item.CardMessage,
+            item.HasBanner,
+            item.BannerMessage,
+            order.Images.Where(image => image.OrderItemId == item.Id).OrderBy(image => image.SortOrder)
+                .Select(image => new OrderImageDto(image.Id, image.OrderItemId, image.ImageUrl, image.SortOrder, image.Description)).ToList())).ToList(),
         order.Images.OrderBy(image => image.SortOrder).Select(image => new OrderImageDto(
             image.Id,
             image.OrderItemId,

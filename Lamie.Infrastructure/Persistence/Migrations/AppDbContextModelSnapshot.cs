@@ -1117,6 +1117,24 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("line_total");
 
+                    b.Property<string>("BannerMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("banner_message");
+
+                    b.Property<string>("CardMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("card_message");
+
+                    b.Property<bool>("HasBanner")
+                        .HasColumnType("bit")
+                        .HasColumnName("has_banner");
+
+                    b.Property<bool>("HasCard")
+                        .HasColumnType("bit")
+                        .HasColumnName("has_card");
+
                     b.Property<string>("Note")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)")

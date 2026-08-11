@@ -10,7 +10,11 @@ public sealed record OrderItemSnapshot(
     decimal UnitPrice,
     int Quantity,
     decimal DiscountAmount = 0,
-    string? Note = null);
+    string? Note = null,
+    bool HasCard = false,
+    string? CardMessage = null,
+    bool HasBanner = false,
+    string? BannerMessage = null);
 
 public sealed record OrderItemUpdate(Guid? Id, OrderItemSnapshot Snapshot);
 
@@ -37,6 +41,10 @@ public sealed class OrderItem
     public decimal DiscountAmount { get; private set; }
     public decimal LineTotal { get; private set; }
     public string? Note { get; private set; }
+    public bool HasCard { get; private set; }
+    public string? CardMessage { get; private set; }
+    public bool HasBanner { get; private set; }
+    public string? BannerMessage { get; private set; }
 
     internal void Update(OrderItemSnapshot snapshot) => Apply(Normalize(snapshot));
 
@@ -53,6 +61,10 @@ public sealed class OrderItem
         DiscountAmount = snapshot.DiscountAmount;
         LineTotal = snapshot.LineTotal;
         Note = snapshot.Note;
+        HasCard = snapshot.HasCard;
+        CardMessage = snapshot.CardMessage;
+        HasBanner = snapshot.HasBanner;
+        BannerMessage = snapshot.BannerMessage;
     }
 
     private static NormalizedSnapshot Normalize(OrderItemSnapshot snapshot)
@@ -76,6 +88,13 @@ public sealed class OrderItem
         if (discountAmount < 0 || discountAmount > gross)
             throw new DomainException("Order item discount must be between zero and the gross line amount.");
 
+        var cardMessage = NormalizeOptional(snapshot.CardMessage, 1000, "Card message");
+        var bannerMessage = NormalizeOptional(snapshot.BannerMessage, 1000, "Banner message");
+        if (snapshot.HasCard && cardMessage is null)
+            throw new DomainException("Card message is required when the order item has a card.");
+        if (snapshot.HasBanner && bannerMessage is null)
+            throw new DomainException("Banner message is required when the order item has a banner.");
+
         return new NormalizedSnapshot(
             snapshot.ProductId,
             NormalizeOptional(snapshot.ProductSku, 100, "Product SKU"),
@@ -85,7 +104,11 @@ public sealed class OrderItem
             snapshot.Quantity,
             discountAmount,
             gross - discountAmount,
-            NormalizeOptional(snapshot.Note, 1000, "Order item note"));
+            NormalizeOptional(snapshot.Note, 1000, "Order item note"),
+            snapshot.HasCard,
+            snapshot.HasCard ? cardMessage : null,
+            snapshot.HasBanner,
+            snapshot.HasBanner ? bannerMessage : null);
     }
 
     private static string? NormalizeOptional(string? value, int maxLength, string field)
@@ -105,5 +128,9 @@ public sealed class OrderItem
         int Quantity,
         decimal DiscountAmount,
         decimal LineTotal,
-        string? Note);
+        string? Note,
+        bool HasCard,
+        string? CardMessage,
+        bool HasBanner,
+        string? BannerMessage);
 }

@@ -372,6 +372,8 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
                 entity.Property(x => x.LineTotal).HasPrecision(18, 2);
                 entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.Property(x => x.CardMessage).HasMaxLength(1000);
+                entity.Property(x => x.BannerMessage).HasMaxLength(1000);
                 entity.HasIndex(x => x.OrderId);
                 entity.HasIndex(x => x.ProductId);
                 entity.HasOne<Product>()

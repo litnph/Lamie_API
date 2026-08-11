@@ -65,7 +65,7 @@ public sealed class ProductSynchronizationTests
             storage,
             new FakeProductTypeRepository(),
             new FakeReferentialIntegrityService());
-        await using var thumbnailContent = new MemoryStream([1, 2, 3]);
+        await using var thumbnailContent = new MemoryStream(ValidPng);
         var thumbnail = new FormFile(thumbnailContent, 0, thumbnailContent.Length, "ThumbnailFile", "thumb.png")
         {
             Headers = new HeaderDictionary(),
@@ -74,7 +74,7 @@ public sealed class ProductSynchronizationTests
         var command = new UpdateProductCommand
         {
             Id = product.Id,
-            Sku = "NEW",
+            Sku = "OLD",
             Price = 120m,
             SalePrice = 90m,
             Stock = 7,
@@ -102,7 +102,7 @@ public sealed class ProductSynchronizationTests
 
         await handler.Handle(command, CancellationToken.None);
 
-        Assert.Equal("NEW", product.Sku);
+        Assert.Equal("OLD", product.Sku);
         Assert.Equal(120m, product.Price);
         Assert.Equal(90m, product.SalePrice);
         Assert.Equal(7, product.Stock);
@@ -116,7 +116,7 @@ public sealed class ProductSynchronizationTests
         Assert.Equal([6], product.Styles.Select(item => item.StyleId));
         Assert.Equal([7], product.Occasions.Select(item => item.OccasionId));
         Assert.All(product.Images, image => Assert.False(image.IsActive));
-        Assert.StartsWith("/uploads/products/NEW/", product.ThumbnailUrl);
+        Assert.StartsWith("/uploads/products/OLD/", product.ThumbnailUrl);
         Assert.Equal(1, repository.UpdateCount);
         Assert.Contains("/uploads/products/old/thumbnail.jpg", storage.DeletedUrls);
         Assert.Contains("/uploads/products/old/image.jpg", storage.DeletedUrls);
@@ -140,7 +140,7 @@ public sealed class ProductSynchronizationTests
         var command = new UpdateProductCommand
         {
             Id = product.Id,
-            Sku = "UPDATED",
+            Sku = "OLD",
             Price = 110m,
             Stock = 3,
             CategoryId = 2,
@@ -149,7 +149,7 @@ public sealed class ProductSynchronizationTests
 
         await handler.Handle(command, CancellationToken.None);
 
-        Assert.Equal("UPDATED", product.Sku);
+        Assert.Equal("OLD", product.Sku);
         Assert.Single(product.Translations);
         Assert.Equal([1], product.Tags.Select(item => item.TagId));
         Assert.Single(product.Images);
@@ -235,7 +235,7 @@ public sealed class ProductSynchronizationTests
             new FakeReferentialIntegrityService());
         var command = new CreateProductCommand
         {
-            Sku = "NEW",
+            Sku = "N3W1",
             Price = 100,
             Stock = 1,
             CategoryId = 1,
@@ -243,7 +243,7 @@ public sealed class ProductSynchronizationTests
             ThumbnailFile = FormFile(
                 "thumbnail.png",
                 "image/png",
-                [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]),
+                ValidPng),
             Translations =
             [
                 new CreateProductTranslationDto
@@ -259,7 +259,7 @@ public sealed class ProductSynchronizationTests
             handler.Handle(command, CancellationToken.None));
 
         Assert.Single(storage.DeletedUrls);
-        Assert.Contains("/uploads/products/NEW/", storage.DeletedUrls[0]);
+        Assert.Contains("/uploads/products/N3W1/", storage.DeletedUrls[0]);
     }
 
     [Fact]
@@ -277,19 +277,19 @@ public sealed class ProductSynchronizationTests
         var command = new UpdateProductCommand
         {
             Id = 1,
-            Sku = "UPDATED",
+            Sku = "OLD",
             Price = 100,
             Stock = 2,
             CategoryId = 1,
             ProductTypeId = 1,
-            ThumbnailFile = FormFile("new.png", "image/png", [1, 2, 3])
+            ThumbnailFile = FormFile("new.png", "image/png", ValidPng)
         };
 
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             handler.Handle(command, CancellationToken.None));
 
         Assert.Single(storage.DeletedUrls);
-        Assert.Contains("/uploads/products/UPDATED/", storage.DeletedUrls[0]);
+        Assert.Contains("/uploads/products/OLD/", storage.DeletedUrls[0]);
         Assert.DoesNotContain("/uploads/products/OLD/original.png", storage.DeletedUrls);
     }
 
@@ -407,6 +407,8 @@ public sealed class ProductSynchronizationTests
             return Task.CompletedTask;
         }
     }
+
+    private static byte[] ValidPng => Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8Dwn4GBgYGJAQoAHgQCAftQWAAAAABJRU5ErkJggg==");
 
     private static IFormFile FormFile(string name, string contentType, byte[] content)
     {

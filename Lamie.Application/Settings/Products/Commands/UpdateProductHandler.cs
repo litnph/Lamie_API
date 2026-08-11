@@ -4,6 +4,7 @@ using Lamie.Application.Common.Persistence;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Repositories;
 using MediatR;
+using Lamie.Application.Common.Uploads;
 
 namespace Lamie.Application.Settings.Products.Commands;
 
@@ -33,6 +34,11 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
         {
             throw new NotFoundException("Product", command.Id);
         }
+
+        // SKU identifies already-watermarked catalog media and is immutable after creation.
+        if (!string.Equals(command.Sku?.Trim(), product.Sku, StringComparison.OrdinalIgnoreCase))
+            throw new ValidationException(new Dictionary<string, string[]> { ["sku"] = ["SKU cannot be changed after product creation."] });
+        command.Sku = product.Sku;
 
         var productType = await _productTypeRepository.GetByIdAsync(command.ProductTypeId);
         if (productType is null)
@@ -125,7 +131,8 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
                 command.Sku,
                 command.ThumbnailFile.FileName,
                 "thumbnail");
-            await using var stream = command.ThumbnailFile.OpenReadStream();
+            await using var source = command.ThumbnailFile.OpenReadStream();
+            await using var stream = await ProductImageWatermarker.ApplyAsync(source, product.Sku, command.ThumbnailFile.ContentType ?? "image/jpeg", cancellationToken);
             var url = await _fileStorage.UploadPublicAsync(
                 stream,
                 objectPath,
@@ -237,7 +244,8 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
         CancellationToken cancellationToken)
     {
         var objectPath = BuildProductObjectPath(sku, file.FileName, $"image-{sortOrder}");
-        await using var stream = file.OpenReadStream();
+        await using var source = file.OpenReadStream();
+        await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, file.ContentType ?? "image/jpeg", cancellationToken);
         var url = await _fileStorage.UploadPublicAsync(
             stream,
             objectPath,

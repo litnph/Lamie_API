@@ -34,7 +34,7 @@ public sealed class ProductTypeTests
 
         var command = new CreateProductCommand
         {
-            Sku = "ROSE-01",
+            Sku = "R0S1",
             Price = 100,
             Stock = 1,
             CategoryId = 1,

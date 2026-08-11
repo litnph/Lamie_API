@@ -17,7 +17,7 @@ public sealed class CreateOrderForm
     public decimal? DeliveryLongitude { get; init; }
     public DateTimeOffset DeliveryAt { get; init; }
     public DateTimeOffset? DeliveryTo { get; init; }
-    public decimal DepositAmount { get; init; }
+    public decimal? DepositAmount { get; init; }
     public decimal ShippingFee { get; init; }
     public string? Description { get; init; }
     public string? ContentNote { get; init; }
