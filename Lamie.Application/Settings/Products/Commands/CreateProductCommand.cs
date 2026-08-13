@@ -11,7 +11,8 @@ namespace Lamie.Application.Settings.Products.Commands
 {
     public class CreateProductCommand : IRequest<int>
     {
-        public string Sku { get; set; } = default!;
+        // Optional on create: the handler generates a unique four-character SKU when omitted.
+        public string? Sku { get; set; }
         public decimal Price { get; set; }
         public decimal? SalePrice { get; set; }
         public int Stock { get; set; }

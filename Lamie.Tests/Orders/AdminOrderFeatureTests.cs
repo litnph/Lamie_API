@@ -1,20 +1,25 @@
 using Lamie.Domain.Entities;
 using Lamie.Domain.Exceptions;
 using Lamie.Domain.Orders;
+using Xunit;
 
 namespace Lamie.Tests.Orders;
 
 public sealed class AdminOrderFeatureTests
 {
     [Theory]
+    [InlineData(100000, 100000)]
     [InlineData(400000, 100000)]
     [InlineData(400001, 200000)]
+    [InlineData(550000, 200000)]
     [InlineData(700000, 200000)]
     [InlineData(700001, 300000)]
     [InlineData(1000000, 300000)]
+    [InlineData(1000001, 300000)]
     [InlineData(1200000, 400000)]
     [InlineData(1500000, 500000)]
     [InlineData(1700000, 600000)]
+    [InlineData(2050000, 700000)]
     public void Default_deposit_matches_business_boundaries(decimal total, decimal expected) =>
         Assert.Equal(expected, DefaultDepositCalculator.Calculate(total));
 

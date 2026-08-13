@@ -16,6 +16,7 @@ namespace Lamie.API.Services;
 public sealed class OrderService : IOrderService
 {
     private const int MaximumPageSize = 100;
+    private const int MaximumBatchSize = 50;
     private static readonly TimeZoneInfo BusinessTimeZone = ResolveBusinessTimeZone();
 
     private readonly AppDbContext _dbContext;
@@ -120,43 +121,11 @@ public sealed class OrderService : IOrderService
 
     public async Task<OrderDetailDto> CreateAsync(CreateOrderForm form, CancellationToken cancellationToken)
     {
-        var actor = CurrentActor();
-        var now = UtcNow();
-        var channelId = !form.ChannelId.HasValue || form.ChannelId.Value == Guid.Empty
-            ? Channel.AdminId
-            : form.ChannelId.Value;
-        await EnsureActiveChannelAsync(channelId, cancellationToken);
-        var snapshots = await ResolveSnapshotsAsync(form.Items, cancellationToken);
-        var customer = await FindOrCreateCustomerAsync(form.OrdererName, form.OrdererPhone ?? string.Empty, now, cancellationToken);
-        var orderCode = await CreateUniqueOrderCodeAsync(now, cancellationToken);
-        var order = new Order(
-            orderCode,
-            channelId,
-            customer?.Id,
-            ToDetails(form, snapshots),
-            snapshots,
-            now,
-            actor.Id,
-            actor.Name);
-
         var uploadedUrls = new List<string>();
         var committed = false;
         try
         {
-            await ValidateImagesAsync(form.Images, order.Items.Count, cancellationToken);
-            foreach (var image in form.Images.Where(item => item.ImageFile is { Length: > 0 }))
-            {
-                var file = image.ImageFile!;
-                var extension = Path.GetExtension(Path.GetFileName(file.FileName)).ToLowerInvariant();
-                var objectPath = $"orders/{order.Id:N}/{image.SortOrder:D3}-{Guid.NewGuid():N}{extension}";
-                await using var stream = file.OpenReadStream();
-                var url = await _fileStorage.UploadPublicAsync(stream, objectPath, file.ContentType, cancellationToken);
-                uploadedUrls.Add(url);
-                var orderItem = order.Items.ElementAt(image.OrderItemIndex);
-                order.AddImage(orderItem.Id, url, image.SortOrder);
-            }
-            EnsureManualItemsHaveImages(order);
-
+            var order = await BuildOrderAsync(form, uploadedUrls, cancellationToken);
             await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
             _dbContext.Orders.Add(order);
             try
@@ -167,27 +136,93 @@ public sealed class OrderService : IOrderService
             }
             catch (DbUpdateException)
             {
-                await transaction.RollbackAsync(cancellationToken);
+                await transaction.RollbackAsync(CancellationToken.None);
                 throw new ConflictException("The order could not be created because its generated code conflicted. Please retry.");
             }
 
             return ToDetailDto(order);
         }
-        catch
+        finally
         {
-            foreach (var url in committed ? Enumerable.Empty<string>() : uploadedUrls)
-            {
-                try
-                {
-                    await _fileStorage.DeleteAsync(url, CancellationToken.None);
-                }
-                catch
-                {
-                    // Cleanup is best-effort; preserve the original application error.
-                }
-            }
+            if (!committed)
+                await DeleteFilesBestEffortAsync(uploadedUrls);
+        }
+    }
 
+    public async Task<BatchCreateOrdersDto> CreateBatchAsync(
+        BatchCreateOrdersForm form,
+        CancellationToken cancellationToken)
+    {
+        if (form.Orders.Count == 0)
+            throw Validation("orders", "At least one order is required.");
+        if (form.Orders.Count > MaximumBatchSize)
+            throw Validation("orders", $"A batch cannot contain more than {MaximumBatchSize} orders.");
+
+        var draftIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var index = 0; index < form.Orders.Count; index++)
+        {
+            var clientDraftId = form.Orders[index].ClientDraftId?.Trim();
+            if (string.IsNullOrWhiteSpace(clientDraftId))
+                throw Validation($"orders[{index}].clientDraftId", "Client draft id is required.");
+            if (clientDraftId.Length > 120)
+                throw Validation($"orders[{index}].clientDraftId", "Client draft id cannot exceed 120 characters.");
+            if (!draftIds.Add(clientDraftId))
+                throw Validation($"orders[{index}].clientDraftId", "Client draft ids must be unique within a batch.");
+        }
+
+        var uploadedUrls = new List<string>();
+        var createdOrders = new List<BatchCreatedOrderDto>(form.Orders.Count);
+        var committed = false;
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        for (var index = 0; index < form.Orders.Count; index++)
+        {
+            var orderForm = form.Orders[index];
+            var clientDraftId = orderForm.ClientDraftId!.Trim();
+            try
+            {
+                var order = await BuildOrderAsync(orderForm, uploadedUrls, cancellationToken);
+                _dbContext.Orders.Add(order);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                createdOrders.Add(new BatchCreatedOrderDto(clientDraftId, order.Id, order.OrderCode));
+            }
+            catch (OperationCanceledException)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                await DeleteFilesBestEffortAsync(uploadedUrls);
+                throw;
+            }
+            catch (Exception exception)
+            {
+                await transaction.RollbackAsync(CancellationToken.None);
+                await DeleteFilesBestEffortAsync(uploadedUrls);
+                throw BatchOrderException.From(index, clientDraftId, exception);
+            }
+        }
+
+        try
+        {
+            await transaction.CommitAsync(cancellationToken);
+            committed = true;
+            return new BatchCreateOrdersDto(createdOrders.Count, createdOrders);
+        }
+        catch (OperationCanceledException)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
             throw;
+        }
+        catch (Exception exception)
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+            var lastIndex = form.Orders.Count - 1;
+            throw BatchOrderException.From(
+                lastIndex,
+                form.Orders[lastIndex].ClientDraftId!.Trim(),
+                exception);
+        }
+        finally
+        {
+            if (!committed)
+                await DeleteFilesBestEffortAsync(uploadedUrls);
         }
     }
 
@@ -427,6 +462,50 @@ public sealed class OrderService : IOrderService
             order.DeliveryLongitude!.Value,
             UtcOffset(order.DeliveryAt),
             order.OrderStatus)).ToList();
+    }
+
+    private async Task<Order> BuildOrderAsync(
+        CreateOrderForm form,
+        ICollection<string> uploadedUrls,
+        CancellationToken cancellationToken)
+    {
+        var actor = CurrentActor();
+        var now = UtcNow();
+        var channelId = !form.ChannelId.HasValue || form.ChannelId.Value == Guid.Empty
+            ? Channel.AdminId
+            : form.ChannelId.Value;
+        await EnsureActiveChannelAsync(channelId, cancellationToken);
+        var snapshots = await ResolveSnapshotsAsync(form.Items, cancellationToken);
+        var customer = await FindOrCreateCustomerAsync(
+            form.OrdererName,
+            form.OrdererPhone ?? string.Empty,
+            now,
+            cancellationToken);
+        var orderCode = await CreateUniqueOrderCodeAsync(now, cancellationToken);
+        var order = new Order(
+            orderCode,
+            channelId,
+            customer?.Id,
+            ToDetails(form, snapshots),
+            snapshots,
+            now,
+            actor.Id,
+            actor.Name);
+
+        await ValidateImagesAsync(form.Images, order.Items.Count, cancellationToken);
+        foreach (var image in form.Images.Where(item => item.ImageFile is { Length: > 0 }))
+        {
+            var file = image.ImageFile!;
+            var extension = Path.GetExtension(Path.GetFileName(file.FileName)).ToLowerInvariant();
+            var objectPath = $"orders/{order.Id:N}/{image.OrderItemIndex:D3}-{image.SortOrder:D3}-{Guid.NewGuid():N}{extension}";
+            await using var stream = file.OpenReadStream();
+            var url = await _fileStorage.UploadPublicAsync(stream, objectPath, file.ContentType, cancellationToken);
+            uploadedUrls.Add(url);
+            var orderItem = order.Items.ElementAt(image.OrderItemIndex);
+            order.AddImage(orderItem.Id, url, image.SortOrder);
+        }
+        EnsureManualItemsHaveImages(order);
+        return order;
     }
 
     private async Task<Order> GetAggregateAsync(Guid id, bool tracked, CancellationToken cancellationToken)

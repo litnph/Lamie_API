@@ -121,6 +121,15 @@ public sealed record PagedOrdersDto(
     bool HasNext,
     bool HasPrevious);
 
+public sealed record BatchCreatedOrderDto(
+    string ClientDraftId,
+    Guid OrderId,
+    string OrderNumber);
+
+public sealed record BatchCreateOrdersDto(
+    int CreatedCount,
+    IReadOnlyList<BatchCreatedOrderDto> Orders);
+
 public enum OrderSortBy
 {
     DeliveryAt = 1,

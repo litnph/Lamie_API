@@ -30,7 +30,8 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
 
     public async Task<int> Handle(CreateProductCommand command, CancellationToken cancellationToken)
     {
-        command.Sku = await ResolveSkuAsync(command.Sku, cancellationToken);
+        var sku = await ResolveSkuAsync(command.Sku, cancellationToken);
+        command.Sku = sku;
         var productType = await _productTypeRepository.GetByIdAsync(command.ProductTypeId);
         if (productType is null || !productType.IsActive)
             throw new ValidationException(new Dictionary<string, string[]>
@@ -51,7 +52,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             cancellationToken);
 
         var product = new Product(
-            command.Sku,
+            sku,
             command.Price,
             command.Stock,
             command.CategoryId,
@@ -85,9 +86,9 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
         {
             if (command.ThumbnailFile is { Length: > 0 })
             {
-                var objectPath = BuildProductObjectPath(command.Sku, command.ThumbnailFile.FileName, "thumbnail");
+                var objectPath = BuildProductObjectPath(sku, command.ThumbnailFile.FileName, "thumbnail");
                 await using var source = command.ThumbnailFile.OpenReadStream();
-                await using var stream = await ProductImageWatermarker.ApplyAsync(source, command.Sku, command.ThumbnailFile.ContentType, cancellationToken);
+                await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, command.ThumbnailFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,
@@ -101,7 +102,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                 product.SetThumbnail(command.ThumbnailUrl);
             }
 
-            await AddImagesAsync(product, command, uploadedUrls, cancellationToken);
+            await AddImagesAsync(product, command, sku, uploadedUrls, cancellationToken);
             if (string.IsNullOrWhiteSpace(product.ThumbnailUrl))
             {
                 product.SetThumbnail(product.Images.OrderBy(image => image.SortOrder).FirstOrDefault()?.ImageUrl);
@@ -125,7 +126,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             if (!ProductSku.IsValidNewSku(normalized))
                 throw new ValidationException(new Dictionary<string, string[]> { ["sku"] = ["SKU must be exactly four uppercase letters or digits."] });
             if (await _repository.SkuExistsAsync(normalized, cancellationToken: cancellationToken))
-                throw new ValidationException(new Dictionary<string, string[]> { ["sku"] = ["SKU already exists."] });
+                throw new ConflictException("SKU already exists.");
             return normalized;
         }
 
@@ -144,6 +145,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
     private async Task AddImagesAsync(
         Product product,
         CreateProductCommand command,
+        string sku,
         ICollection<string> uploadedUrls,
         CancellationToken cancellationToken)
     {
@@ -152,9 +154,9 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             var sortOrder = image.SortOrder ?? index;
             if (image.ImageFile is { Length: > 0 })
             {
-                var objectPath = BuildProductObjectPath(command.Sku, image.ImageFile.FileName, $"image-{index}");
+                var objectPath = BuildProductObjectPath(sku, image.ImageFile.FileName, $"image-{index}");
                 await using var source = image.ImageFile.OpenReadStream();
-                await using var stream = await ProductImageWatermarker.ApplyAsync(source, command.Sku, image.ImageFile.ContentType, cancellationToken);
+                await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, image.ImageFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,

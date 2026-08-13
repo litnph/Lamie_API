@@ -1,4 +1,5 @@
 using Lamie.Application.Common.Exceptions;
+using Lamie.API.Models.Orders;
 using Lamie.Domain.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -24,6 +25,40 @@ namespace Lamie.API.Middlewares
             try
             {
                 await _next(context);
+            }
+            catch (BatchOrderException ex)
+            {
+                if (context.Response.HasStarted)
+                {
+                    throw;
+                }
+
+                if (ex.StatusCode >= StatusCodes.Status500InternalServerError)
+                {
+                    _logger.LogError(
+                        ex.InnerException ?? ex,
+                        "Batch order creation failed at index {BatchIndex}; trace {TraceIdentifier}",
+                        ex.Index,
+                        context.TraceIdentifier);
+                }
+
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = ex.StatusCode;
+                await context.Response.WriteAsJsonAsync(new
+                {
+                    success = false,
+                    code = "BATCH_ORDER_FAILED",
+                    message = ex.Message,
+                    errors = ex.Errors,
+                    batchError = new
+                    {
+                        clientDraftId = ex.ClientDraftId,
+                        index = ex.Index,
+                        code = ex.CauseCode,
+                        message = ex.DetailMessage,
+                        fieldErrors = ex.Errors
+                    }
+                });
             }
             catch (BaseException ex)
             {

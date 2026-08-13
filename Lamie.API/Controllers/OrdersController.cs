@@ -33,6 +33,14 @@ public sealed class OrdersController : ControllerBase
     public Task<OrderDetailDto> Create([FromForm] CreateOrderForm form, CancellationToken cancellationToken) =>
         _orderService.CreateAsync(form, cancellationToken);
 
+    [HttpPost("batch")]
+    [Consumes("multipart/form-data")]
+    [Authorize(Policy = PermissionNames.OrdersManage)]
+    public Task<BatchCreateOrdersDto> CreateBatch(
+        [FromForm] BatchCreateOrdersForm form,
+        CancellationToken cancellationToken) =>
+        _orderService.CreateBatchAsync(form, cancellationToken);
+
     [HttpPut("{id:guid}")]
     [Consumes("multipart/form-data")]
     [Authorize(Policy = PermissionNames.OrdersManage)]

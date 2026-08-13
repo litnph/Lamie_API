@@ -4,6 +4,7 @@ namespace Lamie.API.Models.Orders;
 
 public sealed class CreateOrderForm
 {
+    public string? ClientDraftId { get; init; }
     public string OrdererName { get; init; } = string.Empty;
     public string? OrdererPhone { get; init; }
     public Guid? ChannelId { get; init; }
@@ -23,6 +24,11 @@ public sealed class CreateOrderForm
     public string? ContentNote { get; init; }
     public List<OrderLineRequest> Items { get; init; } = [];
     public List<CreateOrderImageForm> Images { get; init; } = [];
+}
+
+public sealed class BatchCreateOrdersForm
+{
+    public List<CreateOrderForm> Orders { get; init; } = [];
 }
 
 public sealed class CreateOrderImageForm

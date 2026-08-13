@@ -1,12 +1,24 @@
 using Lamie.Application.Common.Uploads;
+using Lamie.Application.Settings.Products.Commands;
 using Lamie.Domain.Products;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;
+using System.Reflection;
+using Xunit;
 
 namespace Lamie.Tests.Products;
 
 public sealed class ProductSkuAndWatermarkTests
 {
+    [Fact]
+    public void Create_product_contract_allows_omitted_sku_for_server_generation()
+    {
+        var property = typeof(CreateProductCommand).GetProperty(nameof(CreateProductCommand.Sku));
+
+        Assert.NotNull(property);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property!).WriteState);
+    }
+
     [Fact]
     public void Generated_sku_is_four_uppercase_alphanumeric_characters()
     {

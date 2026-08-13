@@ -54,6 +54,60 @@ The update fields are the same except that `id`, `rowVersion`, and a non-null `c
 
 There is currently no independent attachment-delete operation: deleting the corresponding item deletes its attachments. Detail responses expose attachments both in each `items[n].images` collection and in the backward-compatible top-level `images` collection.
 
+## Batch create orders
+
+`POST /api/orders/batch`, `multipart/form-data`
+
+Permission: `orders.manage`, identical to single create. The request contains `orders` with 1-50 entries. Each entry reuses the normal create contract and adds a required, batch-unique `clientDraftId` of at most 120 characters. Multipart keys are nested, for example:
+
+```text
+orders[0].clientDraftId
+orders[0].recipientName
+orders[0].items[0].productId
+orders[0].images[0].imageFile
+orders[0].images[0].orderItemIndex
+orders[0].images[0].sortOrder
+```
+
+The service uses the same create core as `POST /api/orders` for channel/customer resolution, product snapshots, pricing, default deposit, card/banner validation, image validation/storage, manual-item illustration rules, actor metadata and order-number generation. The browser sends one batch request, not one create request per order.
+
+Database semantics are `ALL_OR_NOTHING`: all entries run inside one transaction. Every order is saved and the transaction commits once, or every database change rolls back. Files uploaded before a failure are deleted on a best-effort basis. Current create behavior does not reserve inventory until a later status transition, so batch create does not introduce a separate reservation rule.
+
+Success response:
+
+```json
+{
+  "createdCount": 2,
+  "orders": [
+    {
+      "clientDraftId": "local-draft-id",
+      "orderId": "00000000-0000-0000-0000-000000000000",
+      "orderNumber": "L260812-ABCD"
+    }
+  ]
+}
+```
+
+When an entry fails, the normal error envelope is retained and includes `batchError` so Admin can keep the queue and mark the offending row:
+
+```json
+{
+  "success": false,
+  "code": "BATCH_ORDER_FAILED",
+  "message": "Đơn #2: Sản phẩm không hợp lệ.",
+  "errors": { "items": ["Sản phẩm không hợp lệ."] },
+  "batchError": {
+    "clientDraftId": "local-draft-id",
+    "index": 1,
+    "code": "VALIDATION_ERROR",
+    "message": "Sản phẩm không hợp lệ.",
+    "fieldErrors": { "items": ["Sản phẩm không hợp lệ."] }
+  }
+}
+```
+
+`index` is zero-based. `clientDraftId` is returned only for request/result correlation and is not persisted.
+
 ## Order response
 
 `GET /api/orders/{id}` and create/update responses return totals calculated by the backend. The client must not supply or trust `subTotal`, `lineTotal`, or `totalAmount`. Each item contains `id`, product snapshot fields, `unitPrice`, `quantity`, `lineTotal`, `note`, `hasCard`, `cardMessage`, `hasBanner`, `bannerMessage`, and `images`. Each image contains `id`, `orderItemId`, `imageUrl`, `sortOrder`, and `description`.

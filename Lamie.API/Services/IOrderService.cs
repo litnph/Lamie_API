@@ -9,6 +9,7 @@ public interface IOrderService
     Task<PagedOrdersDto> ListAsync(OrderListQuery query, CancellationToken cancellationToken);
     Task<OrderDetailDto> GetAsync(Guid id, CancellationToken cancellationToken);
     Task<OrderDetailDto> CreateAsync(CreateOrderForm form, CancellationToken cancellationToken);
+    Task<BatchCreateOrdersDto> CreateBatchAsync(BatchCreateOrdersForm form, CancellationToken cancellationToken);
     Task<OrderDetailDto> UpdateAsync(Guid id, UpdateOrderForm form, CancellationToken cancellationToken);
     Task ChangeStatusAsync(Guid id, OrderStatus status, CancellationToken cancellationToken);
     Task ChangePaymentStatusAsync(Guid id, PaymentStatus status, CancellationToken cancellationToken);

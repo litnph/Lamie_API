@@ -9,6 +9,8 @@ using Lamie.Domain.Entities;
 using Lamie.Domain.Repositories;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using Xunit;
 
 namespace Lamie.Tests.Products;
@@ -408,7 +410,16 @@ public sealed class ProductSynchronizationTests
         }
     }
 
-    private static byte[] ValidPng => Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR42mP8z8Dwn4GBgYGJAQoAHgQCAftQWAAAAABJRU5ErkJggg==");
+    private static byte[] ValidPng
+    {
+        get
+        {
+            using var image = new Image<Rgba32>(2, 2, new Rgba32(240, 240, 240));
+            using var stream = new MemoryStream();
+            image.SaveAsPng(stream);
+            return stream.ToArray();
+        }
+    }
 
     private static IFormFile FormFile(string name, string contentType, byte[] content)
     {
