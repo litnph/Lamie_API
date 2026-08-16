@@ -1,5 +1,6 @@
 using Lamie.Application.Identity;
 using Lamie.Domain.Entities;
+using Lamie.Infrastructure.Persistence.Configurations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.EntityFrameworkCore.Migrations;
@@ -27,6 +28,8 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
         public DbSet<ProductTranslation> ProductTranslations => Set<ProductTranslation>();
         public DbSet<ProductImage> ProductImages => Set<ProductImage>();
+        public DbSet<AdministrativeUnit> AdministrativeUnits => Set<AdministrativeUnit>();
+        public DbSet<AdministrativeUnitTransition> AdministrativeUnitTransitions => Set<AdministrativeUnitTransition>();
 
         public DbSet<ProductCollection> ProductCollections => Set<ProductCollection>();
         public DbSet<ProductColor> ProductColors => Set<ProductColor>();
@@ -72,6 +75,9 @@ namespace Lamie.Infrastructure.Persistence
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
+            modelBuilder.ApplyConfiguration(new AdministrativeUnitConfiguration());
+            modelBuilder.ApplyConfiguration(new AdministrativeUnitTransitionConfiguration());
+
             modelBuilder.Entity<ExpenseCategory>(entity =>
             {
                 entity.ToTable("fin_expense_categories");
@@ -300,8 +306,17 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.RecipientName).HasMaxLength(200);
                 entity.Property(x => x.RecipientPhone).HasMaxLength(30);
                 entity.Property(x => x.ProvinceShipping);
-                entity.Property(x => x.DeliveryAddress).HasMaxLength(1000);
+                entity.Property(x => x.DeliveryAddress).HasMaxLength(1500);
                 entity.Property(x => x.DeliveryAddressDescription).HasMaxLength(1000);
+                entity.Property(x => x.AddressScheme).HasConversion<int>();
+                entity.Property(x => x.ProvinceCode).HasMaxLength(10);
+                entity.Property(x => x.ProvinceName).HasMaxLength(200);
+                entity.Property(x => x.DistrictCode).HasMaxLength(10);
+                entity.Property(x => x.DistrictName).HasMaxLength(200);
+                entity.Property(x => x.CommuneCode).HasMaxLength(10);
+                entity.Property(x => x.CommuneName).HasMaxLength(200);
+                entity.Property(x => x.AddressDetail).HasMaxLength(1000);
+                entity.Property(x => x.FullAddressSnapshot).HasMaxLength(1500);
                 entity.Property(x => x.DeliveryLatitude).HasPrecision(9, 6);
                 entity.Property(x => x.DeliveryLongitude).HasPrecision(9, 6);
                 entity.Property(x => x.DeliveryTo);
@@ -323,6 +338,7 @@ namespace Lamie.Infrastructure.Persistence
                 entity.HasIndex(x => new { x.ChannelId, x.CreatedAt });
                 entity.HasIndex(x => new { x.DeliveryAt, x.OrderStatus });
                 entity.HasIndex(x => new { x.CustomerId, x.CreatedAt });
+                entity.HasIndex(x => new { x.AddressScheme, x.ProvinceCode, x.CommuneCode });
 
                 entity.HasOne<Channel>()
                     .WithMany()

@@ -1,4 +1,5 @@
 using Lamie.Application.Orders;
+using Lamie.Domain.Entities;
 
 namespace Lamie.API.Models.Orders;
 
@@ -14,6 +15,15 @@ public sealed class CreateOrderForm
     public bool ProvinceShipping { get; init; }
     public string? DeliveryAddress { get; init; }
     public string? DeliveryAddressDescription { get; init; }
+    public AdministrativeScheme? AddressScheme { get; init; }
+    public string? ProvinceCode { get; init; }
+    public string? ProvinceName { get; init; }
+    public string? DistrictCode { get; init; }
+    public string? DistrictName { get; init; }
+    public string? CommuneCode { get; init; }
+    public string? CommuneName { get; init; }
+    public string? AddressDetail { get; init; }
+    public string? FullAddressSnapshot { get; init; }
     public decimal? DeliveryLatitude { get; init; }
     public decimal? DeliveryLongitude { get; init; }
     public DateTimeOffset DeliveryAt { get; init; }
@@ -51,6 +61,15 @@ public sealed class UpdateOrderForm
     public bool ProvinceShipping { get; init; }
     public string? DeliveryAddress { get; init; }
     public string? DeliveryAddressDescription { get; init; }
+    public AdministrativeScheme? AddressScheme { get; init; }
+    public string? ProvinceCode { get; init; }
+    public string? ProvinceName { get; init; }
+    public string? DistrictCode { get; init; }
+    public string? DistrictName { get; init; }
+    public string? CommuneCode { get; init; }
+    public string? CommuneName { get; init; }
+    public string? AddressDetail { get; init; }
+    public string? FullAddressSnapshot { get; init; }
     public decimal? DeliveryLatitude { get; init; }
     public decimal? DeliveryLongitude { get; init; }
     public DateTimeOffset DeliveryAt { get; init; }

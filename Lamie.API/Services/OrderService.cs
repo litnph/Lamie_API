@@ -241,6 +241,15 @@ public sealed class OrderService : IOrderService
         var actor = CurrentActor();
         var now = UtcNow();
         var customer = await FindOrCreateCustomerAsync(form.OrdererName, form.OrdererPhone ?? string.Empty, now, cancellationToken);
+        var address = await ResolveAddressSnapshotAsync(
+            form.PickupAtShop,
+            form.AddressScheme,
+            form.ProvinceCode,
+            form.DistrictCode,
+            form.CommuneCode,
+            form.AddressDetail,
+            form.FullAddressSnapshot ?? form.DeliveryAddress,
+            cancellationToken);
 
         var itemUpdates = form.Items.Select((item, index) =>
         {
@@ -258,7 +267,7 @@ public sealed class OrderService : IOrderService
         var removedUrls = order.Update(
             form.ChannelId,
             customer?.Id,
-            ToDetails(form),
+            ToDetails(form, address),
             itemUpdates,
             now,
             actor.Id,
@@ -482,11 +491,20 @@ public sealed class OrderService : IOrderService
             now,
             cancellationToken);
         var orderCode = await CreateUniqueOrderCodeAsync(now, cancellationToken);
+        var address = await ResolveAddressSnapshotAsync(
+            form.PickupAtShop,
+            form.AddressScheme,
+            form.ProvinceCode,
+            form.DistrictCode,
+            form.CommuneCode,
+            form.AddressDetail,
+            form.FullAddressSnapshot ?? form.DeliveryAddress,
+            cancellationToken);
         var order = new Order(
             orderCode,
             channelId,
             customer?.Id,
-            ToDetails(form, snapshots),
+            ToDetails(form, snapshots, address),
             snapshots,
             now,
             actor.Id,
@@ -665,7 +683,103 @@ public sealed class OrderService : IOrderService
         throw new ConflictException("A unique order code could not be generated. Please retry.");
     }
 
-    private static OrderDetails ToDetails(CreateOrderForm form, IReadOnlyCollection<OrderItemSnapshot> items)
+    private async Task<OrderAddressSnapshot> ResolveAddressSnapshotAsync(
+        bool pickupAtShop,
+        AdministrativeScheme? scheme,
+        string? provinceCode,
+        string? districtCode,
+        string? communeCode,
+        string? addressDetail,
+        string? unstructuredAddress,
+        CancellationToken cancellationToken)
+    {
+        if (pickupAtShop)
+            return OrderAddressSnapshot.Empty;
+
+        var normalizedProvinceCode = TrimToNull(provinceCode);
+        var normalizedDistrictCode = TrimToNull(districtCode);
+        var normalizedCommuneCode = TrimToNull(communeCode);
+        var normalizedDetail = TrimToNull(addressDetail);
+        var normalizedUnstructured = TrimToNull(unstructuredAddress);
+        var hasStructuredCode = normalizedProvinceCode is not null
+            || normalizedDistrictCode is not null
+            || normalizedCommuneCode is not null;
+
+        if (!scheme.HasValue && !hasStructuredCode)
+        {
+            return new OrderAddressSnapshot(
+                null, null, null, null, null, null, null,
+                normalizedDetail, normalizedUnstructured);
+        }
+        if (!scheme.HasValue || !Enum.IsDefined(scheme.Value))
+            throw Validation("addressScheme", "Loại địa chỉ không hợp lệ.");
+        if (normalizedProvinceCode is null)
+            throw Validation("provinceCode", "Vui lòng chọn tỉnh hoặc thành phố.");
+        if (normalizedCommuneCode is null)
+            throw Validation("communeCode", "Vui lòng chọn xã, phường hoặc đặc khu.");
+        if (scheme == AdministrativeScheme.Current && normalizedDistrictCode is not null)
+            throw Validation("districtCode", "Địa chỉ mới không có cấp quận/huyện.");
+        if (scheme == AdministrativeScheme.Legacy && normalizedDistrictCode is null)
+            throw Validation("districtCode", "Địa chỉ cũ cần quận, huyện, thị xã hoặc thành phố.");
+
+        var requestedCodes = new[] { normalizedProvinceCode, normalizedDistrictCode, normalizedCommuneCode }
+            .Where(code => code is not null)
+            .Cast<string>()
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var units = await _dbContext.AdministrativeUnits.AsNoTracking()
+            .Where(unit => unit.Scheme == scheme.Value && unit.IsActive && requestedCodes.Contains(unit.Code))
+            .ToDictionaryAsync(unit => unit.Code, StringComparer.Ordinal, cancellationToken);
+
+        if (!units.TryGetValue(normalizedProvinceCode, out var province) || province.HierarchyLevel != 1)
+            throw Validation("provinceCode", "Tỉnh hoặc thành phố không tồn tại trong bộ dữ liệu đã chọn.");
+        if (!units.TryGetValue(normalizedCommuneCode, out var commune))
+            throw Validation("communeCode", "Xã, phường hoặc đặc khu không tồn tại trong bộ dữ liệu đã chọn.");
+
+        AdministrativeUnit? district = null;
+        if (scheme == AdministrativeScheme.Current)
+        {
+            if (commune.HierarchyLevel != 2 || !string.Equals(commune.ParentCode, province.Code, StringComparison.Ordinal))
+                throw Validation("communeCode", "Xã, phường hoặc đặc khu không thuộc tỉnh/thành phố đã chọn.");
+        }
+        else
+        {
+            if (!units.TryGetValue(normalizedDistrictCode!, out district) || district.HierarchyLevel != 2)
+                throw Validation("districtCode", "Quận, huyện, thị xã hoặc thành phố không tồn tại.");
+            if (!string.Equals(district.ParentCode, province.Code, StringComparison.Ordinal))
+                throw Validation("districtCode", "Đơn vị cấp huyện không thuộc tỉnh/thành phố đã chọn.");
+            if (commune.HierarchyLevel != 3 || !string.Equals(commune.ParentCode, district.Code, StringComparison.Ordinal))
+                throw Validation("communeCode", "Xã, phường hoặc thị trấn không thuộc đơn vị cấp huyện đã chọn.");
+        }
+
+        var canonicalAddress = string.Join(", ", new[]
+        {
+            normalizedDetail,
+            commune.FullName,
+            district?.FullName,
+            province.FullName
+        }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var fullAddress = normalizedUnstructured ?? canonicalAddress;
+
+        return new OrderAddressSnapshot(
+            scheme,
+            province.Code,
+            province.FullName,
+            district?.Code,
+            district?.FullName,
+            commune.Code,
+            commune.FullName,
+            normalizedDetail,
+            fullAddress);
+    }
+
+    private static string? TrimToNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static OrderDetails ToDetails(
+        CreateOrderForm form,
+        IReadOnlyCollection<OrderItemSnapshot> items,
+        OrderAddressSnapshot address)
     {
         var shippingFee = form.PickupAtShop ? 0 : form.ShippingFee;
         var orderValue = items.Sum(item => item.UnitPrice * item.Quantity - item.DiscountAmount) + shippingFee;
@@ -677,7 +791,7 @@ public sealed class OrderService : IOrderService
         form.RecipientPhone,
         form.PickupAtShop,
         form.ProvinceShipping,
-        form.DeliveryAddress,
+        address.FullAddressSnapshot,
         form.DeliveryAddressDescription,
         form.DeliveryLatitude,
         form.DeliveryLongitude,
@@ -687,17 +801,26 @@ public sealed class OrderService : IOrderService
         form.ShippingFee,
         null,
         form.Description,
-        form.ContentNote);
+        form.ContentNote,
+        address.Scheme,
+        address.ProvinceCode,
+        address.ProvinceName,
+        address.DistrictCode,
+        address.DistrictName,
+        address.CommuneCode,
+        address.CommuneName,
+        address.AddressDetail,
+        address.FullAddressSnapshot);
     }
 
-    private static OrderDetails ToDetails(UpdateOrderForm form) => new(
+    private static OrderDetails ToDetails(UpdateOrderForm form, OrderAddressSnapshot address) => new(
         form.OrdererName,
         form.OrdererPhone ?? string.Empty,
         form.RecipientName,
         form.RecipientPhone,
         form.PickupAtShop,
         form.ProvinceShipping,
-        form.DeliveryAddress,
+        address.FullAddressSnapshot,
         form.DeliveryAddressDescription,
         form.DeliveryLatitude,
         form.DeliveryLongitude,
@@ -707,7 +830,16 @@ public sealed class OrderService : IOrderService
         form.ShippingFee,
         form.ShippingFeeActual,
         form.Description,
-        form.ContentNote);
+        form.ContentNote,
+        address.Scheme,
+        address.ProvinceCode,
+        address.ProvinceName,
+        address.DistrictCode,
+        address.DistrictName,
+        address.CommuneCode,
+        address.CommuneName,
+        address.AddressDetail,
+        address.FullAddressSnapshot);
 
     internal static OrderListItemDto ToListDto(Order order) => new(
         order.Id,
@@ -753,6 +885,15 @@ public sealed class OrderService : IOrderService
         order.ProvinceShipping,
         order.DeliveryAddress,
         order.DeliveryAddressDescription,
+        order.AddressScheme,
+        order.ProvinceCode,
+        order.ProvinceName,
+        order.DistrictCode,
+        order.DistrictName,
+        order.CommuneCode,
+        order.CommuneName,
+        order.AddressDetail,
+        order.FullAddressSnapshot,
         UtcOffset(order.DeliveryAt),
         UtcOffset(order.DeliveryTo),
         order.DepositAmount,
@@ -968,4 +1109,19 @@ public sealed class OrderService : IOrderService
         HashSet<Guid> ItemIds,
         HashSet<Guid> ImageIds,
         HashSet<Guid> ChangeLogIds);
+
+    private sealed record OrderAddressSnapshot(
+        AdministrativeScheme? Scheme,
+        string? ProvinceCode,
+        string? ProvinceName,
+        string? DistrictCode,
+        string? DistrictName,
+        string? CommuneCode,
+        string? CommuneName,
+        string? AddressDetail,
+        string? FullAddressSnapshot)
+    {
+        public static readonly OrderAddressSnapshot Empty = new(
+            null, null, null, null, null, null, null, null, null);
+    }
 }

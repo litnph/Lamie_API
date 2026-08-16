@@ -5,9 +5,11 @@ using Lamie.API.Services;
 using Lamie.API.Authorization;
 using Lamie.Application;
 using Lamie.Application.Channels;
+using Lamie.Application.ChatAnalysis;
 using Lamie.Application.Common.Behaviors;
 using Lamie.Application.Common.Persistence;
 using Lamie.Application.Common.Storage;
+using Lamie.Application.Common.Uploads;
 using Lamie.Application.Expenses;
 using Lamie.Application.Identity;
 using Lamie.Application.Reports;
@@ -105,6 +107,30 @@ if (!builder.Environment.IsDevelopment())
 builder.Services.Configure<JwtOptions>(builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<BootstrapAdminOptions>(
     builder.Configuration.GetSection(BootstrapAdminOptions.SectionName));
+builder.Services.Configure<AdministrativeDataOptions>(
+    builder.Configuration.GetSection(AdministrativeDataOptions.SectionName));
+builder.Services.Configure<AdministrativeAddressResolutionOptions>(
+    builder.Configuration.GetSection(AdministrativeAddressResolutionOptions.SectionName));
+builder.Services.AddOptions<ChatScreenshotAnalysisOptions>()
+    .Bind(builder.Configuration.GetSection(ChatScreenshotAnalysisOptions.SectionName))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.TessdataPath), "TessdataPath is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.TesseractExecutablePath), "TesseractExecutablePath is required.")
+    .Validate(options => options.MaximumFiles is >= 1 and <= ImageUploadPolicy.MaximumFileCount, "MaximumFiles is invalid.")
+    .Validate(options => options.MaximumFileBytes is > 0 and <= ImageUploadPolicy.MaximumFileBytes, "MaximumFileBytes is invalid.")
+    .Validate(options => options.MaximumImagePixels is >= 1_000_000 and <= 100_000_000, "MaximumImagePixels is invalid.")
+    .Validate(options => options.MaximumImageDimension is >= 1_000 and <= 32_768, "MaximumImageDimension is invalid.")
+    .Validate(options => options.MaximumImageAspectRatio is >= 1m and <= 20m, "MaximumImageAspectRatio is invalid.")
+    .Validate(options => options.MaximumWorkingImagePixels is >= 500_000
+        && options.MaximumWorkingImagePixels <= options.MaximumImagePixels, "MaximumWorkingImagePixels is invalid.")
+    .Validate(options => options.MaximumWorkingImageDimension is >= 1_000 and <= 8_192, "MaximumWorkingImageDimension is invalid.")
+    .Validate(options => options.OcrTimeoutSeconds is >= 1 and <= 120, "OcrTimeoutSeconds is invalid.")
+    .Validate(options => options.PlatformSignalTargetWidth is >= 800 and <= 4_000, "PlatformSignalTargetWidth is invalid.")
+    .Validate(options => options.HeaderTargetWidth is >= 800 and <= 4_000, "HeaderTargetWidth is invalid.")
+    .Validate(options => options.PlatformSignalTargetWidth <= options.MaximumWorkingImageDimension
+        && options.HeaderTargetWidth <= options.MaximumWorkingImageDimension, "OCR target widths exceed the working-copy limit.")
+    .Validate(options => options.PlatformMinimumScore is > 0m and <= 1m, "PlatformMinimumScore is invalid.")
+    .Validate(options => options.PlatformMinimumMargin is >= 0m and <= 1m, "PlatformMinimumMargin is invalid.")
+    .ValidateOnStart();
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -141,6 +167,15 @@ builder.Services.AddScoped<IPermissionCatalogSynchronizer, PermissionCatalogSync
 builder.Services.AddScoped<INavigationService, NavigationService>();
 builder.Services.AddScoped<IChannelService, ChannelService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
+builder.Services.AddScoped<IAdministrativeAddressService, AdministrativeAddressService>();
+builder.Services.AddScoped<IAdministrativeDataImporter, AdministrativeDataImporter>();
+builder.Services.AddSingleton<IChatOcrProvider, TesseractChatOcrProvider>();
+builder.Services.AddSingleton<IChatImagePreprocessor, ChatImagePreprocessor>();
+builder.Services.AddSingleton<IConversationHeaderExtractor, ConversationHeaderExtractor>();
+builder.Services.AddSingleton<IChatPlatformDetector, ZaloChatPlatformDetector>();
+builder.Services.AddSingleton<IChatPlatformDetector, MetaMessengerChatPlatformDetector>();
+builder.Services.AddSingleton<IChatPlatformDetector, TikTokChatPlatformDetector>();
+builder.Services.AddSingleton<IChatScreenshotAnalyzer, ChatScreenshotAnalyzer>();
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IExpenseCategoryService, ExpenseCategoryService>();
@@ -150,6 +185,7 @@ builder.Services.AddSingleton<IFinancialReportExportService, FinancialReportExpo
 builder.Services.AddScoped<IReferentialIntegrityService, ReferentialIntegrityService>();
 builder.Services.AddHostedService<BootstrapAdminHostedService>();
 builder.Services.AddHostedService<PermissionCatalogHostedService>();
+builder.Services.AddHostedService<AdministrativeDataImportHostedService>();
 builder.Services.AddHealthChecks()
     .AddCheck<DatabaseHealthCheck>("database", tags: ["ready"]);
 

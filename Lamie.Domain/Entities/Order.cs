@@ -36,7 +36,16 @@ public sealed record OrderDetails(
     decimal ShippingFee,
     decimal? ShippingFeeActual,
     string? Description,
-    string? ContentNote);
+    string? ContentNote,
+    AdministrativeScheme? AddressScheme = null,
+    string? ProvinceCode = null,
+    string? ProvinceName = null,
+    string? DistrictCode = null,
+    string? DistrictName = null,
+    string? CommuneCode = null,
+    string? CommuneName = null,
+    string? AddressDetail = null,
+    string? FullAddressSnapshot = null);
 
 public sealed class Order
 {
@@ -103,6 +112,15 @@ public sealed class Order
     public bool ProvinceShipping { get; private set; }
     public string? DeliveryAddress { get; private set; }
     public string? DeliveryAddressDescription { get; private set; }
+    public AdministrativeScheme? AddressScheme { get; private set; }
+    public string? ProvinceCode { get; private set; }
+    public string? ProvinceName { get; private set; }
+    public string? DistrictCode { get; private set; }
+    public string? DistrictName { get; private set; }
+    public string? CommuneCode { get; private set; }
+    public string? CommuneName { get; private set; }
+    public string? AddressDetail { get; private set; }
+    public string? FullAddressSnapshot { get; private set; }
     public decimal? DeliveryLatitude { get; private set; }
     public decimal? DeliveryLongitude { get; private set; }
     public DateTime DeliveryAt { get; private set; }
@@ -275,9 +293,26 @@ public sealed class Order
 
         PickupAtShop = details.PickupAtShop;
         ProvinceShipping = details.ProvinceShipping;
+        if (details.AddressScheme.HasValue && !Enum.IsDefined(details.AddressScheme.Value))
+            throw new DomainException("Address scheme is invalid.");
+        if (details.AddressScheme == AdministrativeScheme.Current
+            && (!string.IsNullOrWhiteSpace(details.DistrictCode) || !string.IsNullOrWhiteSpace(details.DistrictName)))
+            throw new DomainException("A current administrative address cannot contain a district.");
+
+        AddressScheme = details.PickupAtShop ? null : details.AddressScheme;
+        ProvinceCode = details.PickupAtShop ? null : Optional(details.ProvinceCode, 10, "Province code");
+        ProvinceName = details.PickupAtShop ? null : Optional(details.ProvinceName, 200, "Province name");
+        DistrictCode = details.PickupAtShop ? null : Optional(details.DistrictCode, 10, "District code");
+        DistrictName = details.PickupAtShop ? null : Optional(details.DistrictName, 200, "District name");
+        CommuneCode = details.PickupAtShop ? null : Optional(details.CommuneCode, 10, "Commune code");
+        CommuneName = details.PickupAtShop ? null : Optional(details.CommuneName, 200, "Commune name");
+        AddressDetail = details.PickupAtShop ? null : Optional(details.AddressDetail, 1000, "Address detail");
+        FullAddressSnapshot = details.PickupAtShop
+            ? null
+            : Optional(details.FullAddressSnapshot, 1500, "Full address snapshot");
         DeliveryAddress = details.PickupAtShop
             ? null
-            : Optional(details.DeliveryAddress, 1000, "Delivery address");
+            : Optional(details.FullAddressSnapshot ?? details.DeliveryAddress, 1500, "Delivery address");
         DeliveryAddressDescription = details.PickupAtShop
             ? null
             : Optional(details.DeliveryAddressDescription, 1000, "Delivery address description");

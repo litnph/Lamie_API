@@ -1,5 +1,6 @@
 using Lamie.API.Models.Orders;
 using Lamie.API.Services;
+using Lamie.Application.Addresses;
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Common.Storage;
 using Lamie.Application.Orders;
@@ -140,6 +141,40 @@ public sealed class OrderBatchCreateIntegrationTests
         Assert.Single(await environment.DbContext.Orders.ToListAsync());
     }
 
+    [Fact]
+    public async Task Structured_create_preserves_the_pasted_full_address_snapshot()
+    {
+        await using var environment = await TestEnvironment.CreateAsync();
+        environment.DbContext.AdministrativeUnits.AddRange(
+            TestEnvironment.CreateAdministrativeUnit("79", "Hồ Chí Minh", "Thành phố Hồ Chí Minh", AdministrativeUnitType.Municipality, 1),
+            TestEnvironment.CreateAdministrativeUnit("27301", "Chợ Quán", "Phường Chợ Quán", AdministrativeUnitType.Ward, 2, "79"));
+        await environment.DbContext.SaveChangesAsync();
+        const string rawAddress = "80/3 Nguyễn Trãi, phường Chợ Quán";
+
+        var created = await environment.Service.CreateAsync(
+            environment.CreateForm(
+                null,
+                "0900000032",
+                addressScheme: AdministrativeScheme.Current,
+                provinceCode: "79",
+                communeCode: "27301",
+                addressDetail: "80/3 Nguyễn Trãi",
+                fullAddressSnapshot: rawAddress),
+            CancellationToken.None);
+
+        Assert.Equal("80/3 Nguyễn Trãi", created.AddressDetail);
+        Assert.Equal(rawAddress, created.FullAddressSnapshot);
+        Assert.Equal("Thành phố Hồ Chí Minh", created.ProvinceName);
+        Assert.Equal("Phường Chợ Quán", created.CommuneName);
+
+        environment.DbContext.ChangeTracker.Clear();
+        var loadedForEdit = await environment.Service.GetAsync(created.Id, CancellationToken.None);
+        Assert.Equal(rawAddress, loadedForEdit.FullAddressSnapshot);
+        Assert.Equal("80/3 Nguyễn Trãi", loadedForEdit.AddressDetail);
+        Assert.Equal("79", loadedForEdit.ProvinceCode);
+        Assert.Equal("27301", loadedForEdit.CommuneCode);
+    }
+
     private static CreateOrderImageForm CreateGif(string fileName, byte marker)
     {
         var bytes = "GIF89a"u8.ToArray().Concat(new byte[] { 0, 0, 0, 0, 0, marker }).ToArray();
@@ -209,7 +244,12 @@ public sealed class OrderBatchCreateIntegrationTests
             string? cardMessage = null,
             bool hasBanner = false,
             string? bannerMessage = null,
-            string? productId = null) =>
+            string? productId = null,
+            AdministrativeScheme? addressScheme = null,
+            string? provinceCode = null,
+            string? communeCode = null,
+            string? addressDetail = null,
+            string? fullAddressSnapshot = null) =>
             new()
             {
                 ClientDraftId = clientDraftId,
@@ -219,6 +259,11 @@ public sealed class OrderBatchCreateIntegrationTests
                 RecipientName = $"Recipient {recipientPhone}",
                 RecipientPhone = recipientPhone,
                 DeliveryAddress = "461 Phan Văn Trị",
+                AddressScheme = addressScheme,
+                ProvinceCode = provinceCode,
+                CommuneCode = communeCode,
+                AddressDetail = addressDetail,
+                FullAddressSnapshot = fullAddressSnapshot,
                 DeliveryAt = Now.AddDays(1),
                 DepositAmount = deposit,
                 ShippingFee = 50_000,
@@ -238,6 +283,29 @@ public sealed class OrderBatchCreateIntegrationTests
                     }
                 ]
             };
+
+        public static AdministrativeUnit CreateAdministrativeUnit(
+            string code,
+            string name,
+            string fullName,
+            AdministrativeUnitType type,
+            int level,
+            string? parentCode = null) => new(
+            code,
+            name,
+            fullName,
+            VietnameseTextNormalizer.Search(name),
+            AdministrativeScheme.Current,
+            type,
+            level,
+            parentCode,
+            new DateOnly(2025, 7, 1),
+            null,
+            true,
+            "test",
+            "https://example.test",
+            "test",
+            1);
 
         public async ValueTask DisposeAsync()
         {
