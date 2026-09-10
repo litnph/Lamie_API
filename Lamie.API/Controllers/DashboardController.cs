@@ -21,6 +21,7 @@ public sealed class DashboardController : ControllerBase
     [HttpGet]
     public Task<DashboardDto> Get(
         [FromQuery] string period = "30d",
+        [FromQuery] bool includeShippingFeeInRevenue = true,
         CancellationToken cancellationToken = default) =>
-        _dashboardService.GetAsync(period, cancellationToken);
+        _dashboardService.GetAsync(period, includeShippingFeeInRevenue, cancellationToken);
 }

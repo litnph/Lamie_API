@@ -42,7 +42,8 @@ public sealed record CurrentNavigationRouteDto(
     string PageKey,
     string Path,
     string? PermissionCode,
-    int SortOrder);
+    int SortOrder,
+    string? ActiveMenuKey);
 
 public sealed record SaveNavigationRequest(
     string Key,

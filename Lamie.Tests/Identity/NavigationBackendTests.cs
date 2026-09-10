@@ -132,9 +132,29 @@ public sealed class NavigationBackendTests
             await dbContext.Database.MigrateAsync();
             await dbContext.Database.MigrateAsync();
 
-            Assert.Equal(25, await dbContext.Navigation.CountAsync());
-            Assert.Equal(25, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
-            Assert.Equal(10, await dbContext.Navigation.CountAsync(item => !item.IsVisible));
+            Assert.Equal(44, await dbContext.Navigation.CountAsync());
+            Assert.Equal(44, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
+            Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "tasks.workspace")).ParentId is null);
+            Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "catalog-settings.home")).ParentId is null);
+            Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "ingredients.demand")).IsVisible);
+            var operations = await dbContext.Navigation.SingleAsync(item => item.Key == "group.operations");
+            var inventory = await dbContext.Navigation.SingleAsync(item => item.Key == "ingredients.inventory");
+            var legacyInventoryGroup = await dbContext.Navigation.SingleAsync(item => item.Key == "inventory.group");
+            Assert.Equal("Kho hàng", inventory.Label);
+            Assert.Equal(operations.Id, inventory.ParentId);
+            Assert.True(inventory.IsVisible);
+            Assert.False(legacyInventoryGroup.IsVisible);
+            Assert.Null(legacyInventoryGroup.ParentId);
+            Assert.All(
+                await dbContext.Navigation
+                    .Where(item => item.Key == "ingredients.inventory-receiving"
+                        || item.Key == "ingredients.inventory-transactions")
+                    .ToListAsync(),
+                item =>
+                {
+                    Assert.Equal(inventory.Id, item.ParentId);
+                    Assert.False(item.IsVisible);
+                });
             Assert.Equal(0, await CountForeignKeysAsync(dbContext));
             var operatorOwned = await dbContext.Navigation.SingleAsync(item => item.Key == "dashboard.home");
             Assert.Equal(operatorOwnedId, operatorOwned.Id);
@@ -168,7 +188,7 @@ public sealed class NavigationBackendTests
         {
             await dbContext.Database.MigrateAsync();
             Assert.Equal(0, await CountForeignKeysAsync(dbContext));
-            Assert.Equal(25, await dbContext.Navigation.CountAsync());
+            Assert.Equal(44, await dbContext.Navigation.CountAsync());
             dbContext.Navigation.RemoveRange(dbContext.Navigation);
             await dbContext.SaveChangesAsync();
 
@@ -230,7 +250,7 @@ public sealed class NavigationBackendTests
             var edit = await service.CreateNavigationAsync(
                 RouteRequest(
                     "products.edit",
-                    root.Id,
+                    products.Id,
                     "Edit product",
                     "/admin/products/:id",
                     PermissionNames.ProductsManage,
@@ -316,7 +336,8 @@ public sealed class NavigationBackendTests
             var adminRoutes = await service.GetCurrentUserRoutesAsync(
                 adminUser.Id,
                 CancellationToken.None);
-            Assert.Contains(adminRoutes, item => item.Id == edit.Id);
+            var editRoute = Assert.Single(adminRoutes, item => item.Id == edit.Id);
+            Assert.Equal(products.Key, editRoute.ActiveMenuKey);
             await service.SetNavigationEnabledAsync(edit.Id, false, CancellationToken.None);
             Assert.DoesNotContain(
                 await service.GetCurrentUserRoutesAsync(adminUser.Id, CancellationToken.None),

@@ -3,7 +3,7 @@ using Lamie.Infrastructure.Options;
 
 namespace Lamie.Infrastructure.Storage;
 
-public sealed class LocalFileStorage : IFileStorage
+public sealed class LocalFileStorage : IFileStorage, IPublicFileReader
 {
     private readonly string _rootPath;
     private readonly string _rootPathPrefix;
@@ -106,6 +106,20 @@ public sealed class LocalFileStorage : IFileStorage
         return Task.CompletedTask;
     }
 
+    public async Task<StoredPublicFile?> ReadPublicAsync(
+        string? publicUrl,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryResolvePublicUrl(publicUrl, out var destinationPath))
+            return null;
+        if (!File.Exists(destinationPath))
+            return null;
+
+        var bytes = await File.ReadAllBytesAsync(destinationPath, cancellationToken);
+        var fileName = Path.GetFileName(destinationPath);
+        return new StoredPublicFile(bytes, ContentTypeFor(fileName), fileName);
+    }
+
     public static string ResolveRootPath(string configuredRootPath, string contentRootPath)
     {
         if (string.IsNullOrWhiteSpace(configuredRootPath))
@@ -191,6 +205,48 @@ public sealed class LocalFileStorage : IFileStorage
 
         return destinationPath;
     }
+
+    private bool TryResolvePublicUrl(string? publicUrl, out string destinationPath)
+    {
+        destinationPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(publicUrl))
+            return false;
+
+        if (publicUrl.Contains("://", StringComparison.Ordinal))
+            return false;
+
+        var urlPath = publicUrl.Split('?', '#')[0];
+        var expectedPrefix = $"{_publicBasePath}/";
+        if (!urlPath.StartsWith(expectedPrefix, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        try
+        {
+            var encodedObjectPath = urlPath[expectedPrefix.Length..];
+            var objectPath = string.Join(
+                '/',
+                encodedObjectPath
+                    .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(Uri.UnescapeDataString));
+            destinationPath = ResolveDestinationPath(NormalizeObjectPath(objectPath));
+            return true;
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or UriFormatException)
+        {
+            destinationPath = string.Empty;
+            return false;
+        }
+    }
+
+    private static string ContentTypeFor(string fileName) =>
+        Path.GetExtension(fileName).ToLowerInvariant() switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => "application/octet-stream"
+        };
 
     private void DeleteEmptyParentDirectories(string? directoryPath)
     {

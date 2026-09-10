@@ -125,6 +125,8 @@ public sealed class ExpenseService : IExpenseService
     {
         var expense = await _dbContext.Expenses.FindAsync([id], cancellationToken)
             ?? throw new NotFoundException(nameof(Expense), id);
+        if (expense.StockReceiptId.HasValue)
+            throw new ConflictException("Chi phí được tạo từ phiếu nhập kho không thể xóa riêng. Hãy giữ chứng từ để bảo toàn lịch sử đối soát.");
         _dbContext.Expenses.Remove(expense);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -250,7 +252,8 @@ public sealed class ExpenseService : IExpenseService
         expense.Description,
         expense.Notes,
         ToUtcOffset(expense.CreatedAt),
-        ToUtcOffset(expense.UpdatedAt));
+        ToUtcOffset(expense.UpdatedAt),
+        expense.StockReceiptId);
 
     private static DateTimeOffset ToUtcOffset(DateTime value) =>
         new(DateTime.SpecifyKind(value, DateTimeKind.Utc));

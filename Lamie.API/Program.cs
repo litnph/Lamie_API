@@ -10,10 +10,14 @@ using Lamie.Application.Common.Behaviors;
 using Lamie.Application.Common.Persistence;
 using Lamie.Application.Common.Storage;
 using Lamie.Application.Common.Uploads;
+using Lamie.Application.Content;
 using Lamie.Application.Expenses;
+using Lamie.Application.FeData;
 using Lamie.Application.Identity;
+using Lamie.Application.Ingredients;
 using Lamie.Application.Reports;
 using Lamie.Application.Settings.Products.Commands;
+using Lamie.Application.Settings.Products;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Repositories;
 using Lamie.Infrastructure.Options;
@@ -111,6 +115,29 @@ builder.Services.Configure<AdministrativeDataOptions>(
     builder.Configuration.GetSection(AdministrativeDataOptions.SectionName));
 builder.Services.Configure<AdministrativeAddressResolutionOptions>(
     builder.Configuration.GetSection(AdministrativeAddressResolutionOptions.SectionName));
+builder.Services.AddOptions<FeDataExportOptions>()
+    .Bind(builder.Configuration.GetSection(FeDataExportOptions.SectionName))
+    .Validate(options => !string.IsNullOrWhiteSpace(options.TargetDirectory), "FE Data target directory is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.AllowedRoot), "FE Data allowed root is required.")
+    .ValidateOnStart();
+builder.Services.AddOptions<ProductRecognitionOptions>()
+    .Bind(builder.Configuration.GetSection(ProductRecognitionOptions.SectionName))
+    .Validate(options => options.MinimumSimilarity is >= 0 and <= 1,
+        "Product recognition minimum similarity must be between 0 and 1.")
+    .Validate(options => options.BackfillBatchSize is >= 1 and <= 100,
+        "Product recognition backfill batch size must be between 1 and 100.")
+    .ValidateOnStart();
+builder.Services.AddOptions<OpenAIContentOptions>()
+    .Bind(builder.Configuration.GetSection(OpenAIContentOptions.SectionName))
+    .Validate(options => Uri.TryCreate(options.Endpoint, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps, "OpenAI endpoint must be an absolute HTTPS URL.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.Model), "OpenAI model is required.")
+    .Validate(options => !string.IsNullOrWhiteSpace(options.PromptVersion), "OpenAI prompt version is required.")
+    .Validate(options => options.TimeoutSeconds is >= 5 and <= 180, "OpenAI timeout is invalid.")
+    .Validate(options => options.MaximumRetries is >= 0 and <= 4, "OpenAI retry count is invalid.")
+    .Validate(options => options.MaximumImages is >= 1 and <= 4, "OpenAI image count is invalid.")
+    .Validate(options => options.MaximumImageBytes is > 0 and <= ImageUploadPolicy.MaximumFileBytes, "OpenAI image size is invalid.")
+    .ValidateOnStart();
 builder.Services.AddOptions<ChatScreenshotAnalysisOptions>()
     .Bind(builder.Configuration.GetSection(ChatScreenshotAnalysisOptions.SectionName))
     .Validate(options => !string.IsNullOrWhiteSpace(options.TessdataPath), "TessdataPath is required.")
@@ -182,7 +209,16 @@ builder.Services.AddScoped<IExpenseCategoryService, ExpenseCategoryService>();
 builder.Services.AddScoped<IExpenseService, ExpenseService>();
 builder.Services.AddScoped<IFinancialReportService, FinancialReportService>();
 builder.Services.AddSingleton<IFinancialReportExportService, FinancialReportExportService>();
+builder.Services.AddHttpClient<IContentAiProvider, OpenAIContentAiProvider>(client =>
+    client.Timeout = Timeout.InfiniteTimeSpan);
+builder.Services.AddScoped<IContentPublishingService, ContentPublishingService>();
+builder.Services.AddScoped<IFeDataExportService, FeDataExportService>();
+builder.Services.AddScoped<IProductCatalogFeatureService, ProductCatalogFeatureService>();
+builder.Services.AddSingleton<IProductVisualEmbeddingProvider, ProductVisualEmbeddingProvider>();
 builder.Services.AddScoped<IReferentialIntegrityService, ReferentialIntegrityService>();
+builder.Services.AddScoped<IIngredientCatalogService, IngredientCatalogService>();
+builder.Services.AddScoped<IIngredientDemandReportService, IngredientDemandReportService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
 builder.Services.AddHostedService<BootstrapAdminHostedService>();
 builder.Services.AddHostedService<PermissionCatalogHostedService>();
 builder.Services.AddHostedService<AdministrativeDataImportHostedService>();
@@ -236,8 +272,9 @@ var localStoragePublicBasePath = LocalFileStorage.NormalizePublicBasePath(
     localStorageOptions.PublicBasePath);
 
 Directory.CreateDirectory(localStorageRootPath);
-builder.Services.AddSingleton<IFileStorage>(
-    new LocalFileStorage(localStorageOptions, localStorageRootPath));
+var localFileStorage = new LocalFileStorage(localStorageOptions, localStorageRootPath);
+builder.Services.AddSingleton<IFileStorage>(localFileStorage);
+builder.Services.AddSingleton<IPublicFileReader>(localFileStorage);
 
 builder.Services.AddCors(options =>
 {
@@ -260,6 +297,28 @@ builder.Services.AddRateLimiter(options =>
         {
             PermitLimit = 10,
             Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+    options.AddPolicy("content-generation", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.User.FindFirst("sub")?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(10),
+            QueueLimit = 0,
+            AutoReplenishment = true
+        }));
+    options.AddPolicy("product-recognition", context => RateLimitPartition.GetFixedWindowLimiter(
+        partitionKey: context.User.FindFirst("sub")?.Value
+            ?? context.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown",
+        factory: _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 15,
+            Window = TimeSpan.FromMinutes(10),
             QueueLimit = 0,
             AutoReplenishment = true
         }));
@@ -333,8 +392,8 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.UseRouting();
 app.UseCors("AdminClient");
-app.UseRateLimiter();
 app.UseAuthentication();
+app.UseRateLimiter();
 app.UseAuthorization();
 app.MapHealthChecks("/health/live", new HealthCheckOptions
 {

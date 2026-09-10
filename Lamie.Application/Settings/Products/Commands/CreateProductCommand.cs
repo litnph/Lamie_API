@@ -21,14 +21,17 @@ namespace Lamie.Application.Settings.Products.Commands
         public int ProductTypeId { get; set; }
         public IFormFile? ThumbnailFile { get; set; }
         public string? ThumbnailUrl { get; set; }
+        public bool IsVisibleOnFE { get; set; }
 
         public List<int> TagIds { get; set; } = new();
         public List<int> ColorIds { get; set; } = new();
         public List<int> CollectionIds { get; set; } = new();
         public List<int> StyleIds { get; set; } = new();
         public List<int> OccasionIds { get; set; } = new();
+        public List<int> SimilarProductIds { get; set; } = new();
 
         public List<CreateProductTranslationDto> Translations { get; set; } = new();
         public List<CreateProductImageDto> Images { get; set; } = new();
+        public List<ProductIngredientInputDto> Ingredients { get; set; } = new();
     }
 }

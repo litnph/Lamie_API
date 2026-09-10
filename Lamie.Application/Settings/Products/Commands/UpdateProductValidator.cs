@@ -70,6 +70,24 @@ namespace Lamie.Application.Settings.Products.Commands
                         .MustAsync(ImageUploadPolicy.HasValidSignatureAsync)
                         .WithMessage("ImageFile content does not match its image type.");
                 });
+
+            RuleFor(x => x.Ingredients)
+                .Must(HaveUniqueIngredientIds)
+                .WithMessage("Product ingredient ids must be unique.")
+                .When(x => x.IsFullReplacement);
+            RuleForEach(x => x.Ingredients).ChildRules(ingredient =>
+            {
+                ingredient.RuleFor(x => x.IngredientId).GreaterThan(0);
+                ingredient.RuleFor(x => x.BaseQuantity).GreaterThan(0).PrecisionScale(18, 6, true);
+                ingredient.RuleFor(x => x.Note).MaximumLength(1000);
+                ingredient.RuleFor(x => x.SortOrder).GreaterThanOrEqualTo(0);
+            }).When(x => x.IsFullReplacement);
+
+            RuleFor(x => x.SimilarProductIds)
+                .Must((command, ids) => ids.All(id => id > 0 && id != command.Id)
+                    && ids.Distinct().Count() == ids.Count)
+                .WithMessage("Similar product ids must be unique, positive, and different from the current product.")
+                .When(x => x.IsFullReplacement);
         }
 
         private static bool HaveUniqueLanguageCodes(
@@ -80,5 +98,9 @@ namespace Lamie.Application.Settings.Products.Commands
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Count() == translations.Count;
         }
+
+        private static bool HaveUniqueIngredientIds(
+            IReadOnlyCollection<Lamie.Application.Settings.Products.Dtos.ProductIngredientInputDto> ingredients) =>
+            ingredients.Select(item => item.IngredientId).Distinct().Count() == ingredients.Count;
     }
 }

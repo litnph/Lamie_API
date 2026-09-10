@@ -14,12 +14,18 @@ public sealed record OrderItemSnapshot(
     bool HasCard = false,
     string? CardMessage = null,
     bool HasBanner = false,
-    string? BannerMessage = null);
+    string? BannerMessage = null,
+    IReadOnlyList<IngredientRecipeSnapshot>? IngredientRecipe = null,
+    DateTime? IngredientSnapshotCapturedAtUtc = null,
+    int? ProductTypeId = null,
+    string? ProductTypeName = null);
 
 public sealed record OrderItemUpdate(Guid? Id, OrderItemSnapshot Snapshot);
 
 public sealed class OrderItem
 {
+    private readonly List<OrderItemIngredientSnapshot> _ingredientSnapshots = [];
+
     private OrderItem()
     {
     }
@@ -27,12 +33,16 @@ public sealed class OrderItem
     internal OrderItem(OrderItemSnapshot snapshot)
     {
         Id = Guid.NewGuid();
-        Apply(Normalize(snapshot));
+        var normalized = Normalize(snapshot);
+        Apply(normalized);
+        ReplaceIngredientSnapshots(normalized);
     }
 
     public Guid Id { get; private set; }
     public Guid OrderId { get; private set; }
     public int? ProductId { get; private set; }
+    public int? ProductTypeId { get; private set; }
+    public string? ProductTypeName { get; private set; }
     public string? ProductSku { get; private set; }
     public string ProductName { get; private set; } = string.Empty;
     public string? ThumbnailUrl { get; private set; }
@@ -45,14 +55,27 @@ public sealed class OrderItem
     public string? CardMessage { get; private set; }
     public bool HasBanner { get; private set; }
     public string? BannerMessage { get; private set; }
+    public DateTime? IngredientSnapshotCapturedAtUtc { get; private set; }
+    public IReadOnlyCollection<OrderItemIngredientSnapshot> IngredientSnapshots => _ingredientSnapshots;
 
-    internal void Update(OrderItemSnapshot snapshot) => Apply(Normalize(snapshot));
+    internal void Update(OrderItemSnapshot snapshot)
+    {
+        var normalized = Normalize(snapshot);
+        var quantityChanged = Quantity != normalized.Quantity;
+        Apply(normalized);
+        if (normalized.IngredientRecipe is not null)
+            ReplaceIngredientSnapshots(normalized);
+        else if (quantityChanged && _ingredientSnapshots.Count > 0)
+            RefreshIngredientSnapshotQuantities(normalized.Quantity);
+    }
 
     internal static void Validate(OrderItemSnapshot snapshot) => _ = Normalize(snapshot);
 
     private void Apply(NormalizedSnapshot snapshot)
     {
         ProductId = snapshot.ProductId;
+        ProductTypeId = snapshot.ProductTypeId;
+        ProductTypeName = snapshot.ProductTypeName;
         ProductSku = snapshot.ProductSku;
         ProductName = snapshot.ProductName;
         ThumbnailUrl = snapshot.ThumbnailUrl;
@@ -67,16 +90,84 @@ public sealed class OrderItem
         BannerMessage = snapshot.BannerMessage;
     }
 
+    private void ReplaceIngredientSnapshots(NormalizedSnapshot snapshot)
+    {
+        _ingredientSnapshots.Clear();
+        IngredientSnapshotCapturedAtUtc = snapshot.IngredientSnapshotCapturedAtUtc;
+        if (snapshot.IngredientRecipe is null || snapshot.IngredientSnapshotCapturedAtUtc is null)
+            return;
+
+        foreach (var recipe in snapshot.IngredientRecipe)
+        {
+            _ingredientSnapshots.Add(new OrderItemIngredientSnapshot(
+                recipe,
+                snapshot.Quantity,
+                snapshot.IngredientSnapshotCapturedAtUtc.Value));
+        }
+    }
+
+    private void RefreshIngredientSnapshotQuantities(int productQuantity)
+    {
+        DateTime? capturedAtUtc = IngredientSnapshotCapturedAtUtc.HasValue
+            ? DateTime.SpecifyKind(IngredientSnapshotCapturedAtUtc.Value, DateTimeKind.Utc)
+            : null;
+        if (!capturedAtUtc.HasValue)
+            return;
+
+        var recipe = _ingredientSnapshots
+            .OrderBy(snapshot => snapshot.SortOrder)
+            .ThenBy(snapshot => snapshot.Id)
+            .Select(snapshot => new IngredientRecipeSnapshot(
+                snapshot.IngredientId,
+                snapshot.IngredientCode,
+                snapshot.IngredientName,
+                snapshot.BaseUnitCode,
+                snapshot.BaseUnitName,
+                snapshot.BaseUnitSymbol,
+                snapshot.PerProductBaseQuantity,
+                snapshot.Note,
+                snapshot.SortOrder))
+            .ToArray();
+
+        _ingredientSnapshots.Clear();
+        foreach (var item in recipe)
+            _ingredientSnapshots.Add(new OrderItemIngredientSnapshot(item, productQuantity, capturedAtUtc.Value));
+    }
+
     private static NormalizedSnapshot Normalize(OrderItemSnapshot snapshot)
     {
         if (snapshot.ProductId is <= 0)
             throw new DomainException("Product id must be greater than zero when supplied.");
+        if (snapshot.ProductTypeId is <= 0)
+            throw new DomainException("Product type id must be greater than zero when supplied.");
         if (string.IsNullOrWhiteSpace(snapshot.ProductName))
             throw new DomainException("Order item product name is required.");
         if (snapshot.UnitPrice < 0)
             throw new DomainException("Order item unit price cannot be negative.");
         if (snapshot.Quantity <= 0)
             throw new DomainException("Order item quantity must be greater than zero.");
+        if ((snapshot.IngredientRecipe is null) != (snapshot.IngredientSnapshotCapturedAtUtc is null))
+            throw new DomainException("Ingredient recipe and capture time must either both be supplied or both be omitted.");
+        if (snapshot.IngredientSnapshotCapturedAtUtc is { Kind: not DateTimeKind.Utc })
+            throw new DomainException("Ingredient snapshot time must be UTC.");
+
+        var ingredientRecipe = snapshot.IngredientRecipe?.ToArray();
+        if (ingredientRecipe is not null)
+        {
+            if (ingredientRecipe.Where(item => item.IngredientId.HasValue)
+                .GroupBy(item => item.IngredientId!.Value).Any(group => group.Count() > 1))
+                throw new DomainException("Ingredient snapshot ids must be unique.");
+            if (ingredientRecipe.GroupBy(item => item.IngredientCode, StringComparer.OrdinalIgnoreCase)
+                .Any(group => group.Count() > 1))
+                throw new DomainException("Ingredient snapshot codes must be unique.");
+            foreach (var recipe in ingredientRecipe)
+            {
+                OrderItemIngredientSnapshot.Validate(
+                    recipe,
+                    snapshot.Quantity,
+                    snapshot.IngredientSnapshotCapturedAtUtc!.Value);
+            }
+        }
 
         var productName = snapshot.ProductName.Trim();
         if (productName.Length > 300)
@@ -108,7 +199,11 @@ public sealed class OrderItem
             snapshot.HasCard,
             snapshot.HasCard ? cardMessage : null,
             snapshot.HasBanner,
-            snapshot.HasBanner ? bannerMessage : null);
+            snapshot.HasBanner ? bannerMessage : null,
+            ingredientRecipe,
+            snapshot.IngredientSnapshotCapturedAtUtc,
+            snapshot.ProductTypeId,
+            NormalizeOptional(snapshot.ProductTypeName, 200, "Product type name"));
     }
 
     private static string? NormalizeOptional(string? value, int maxLength, string field)
@@ -132,5 +227,9 @@ public sealed class OrderItem
         bool HasCard,
         string? CardMessage,
         bool HasBanner,
-        string? BannerMessage);
+        string? BannerMessage,
+        IReadOnlyList<IngredientRecipeSnapshot>? IngredientRecipe,
+        DateTime? IngredientSnapshotCapturedAtUtc,
+        int? ProductTypeId,
+        string? ProductTypeName);
 }

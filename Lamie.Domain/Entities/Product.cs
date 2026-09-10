@@ -14,6 +14,8 @@ namespace Lamie.Domain.Entities
         private readonly List<ProductTag> _tags = new();
         private readonly List<ProductStyle> _styles = new();
         private readonly List<ProductOccasion> _occasions = new();
+        private readonly List<ProductIngredient> _ingredients = new();
+        private readonly List<ProductSimilarProduct> _similarProducts = new();
 
         public int Id { get; private set; }
         public string Sku { get; private set; } = default!;
@@ -24,7 +26,10 @@ namespace Lamie.Domain.Entities
         public int CategoryId { get; private set; }
         public int? ProductTypeId { get; private set; }
         public bool IsActive { get; private set; }
+        public bool IsVisibleOnFE { get; private set; }
         public string? ThumbnailUrl { get; private set; }
+        public byte[]? ThumbnailVisualEmbedding { get; private set; }
+        public string? ThumbnailVisualEmbeddingVersion { get; private set; }
         public byte[] RowVersion { get; private set; } = Array.Empty<byte>();
 
         public IReadOnlyCollection<ProductTranslation> Translations => _translations;
@@ -35,6 +40,8 @@ namespace Lamie.Domain.Entities
         public IReadOnlyCollection<ProductTag> Tags => _tags;
         public IReadOnlyCollection<ProductStyle> Styles => _styles;
         public IReadOnlyCollection<ProductOccasion> Occasions => _occasions;
+        public IReadOnlyCollection<ProductIngredient> Ingredients => _ingredients;
+        public IReadOnlyCollection<ProductSimilarProduct> SimilarProducts => _similarProducts;
 
         private Product() { } // EF
 
@@ -61,6 +68,7 @@ namespace Lamie.Domain.Entities
             CategoryId = categoryId;
             ProductTypeId = productTypeId;
             IsActive = true;
+            IsVisibleOnFE = false;
         }
 
         public void AddTranslation(string languageCode, string name, string slug, string description)
@@ -142,18 +150,31 @@ namespace Lamie.Domain.Entities
             }
         }
 
-        public void AddImage(string imageUrl, int sortOrder)
+        public void AddImage(
+            string imageUrl,
+            int sortOrder,
+            byte[]? visualEmbedding = null,
+            string? visualEmbeddingVersion = null)
         {
-            _images.Add(new ProductImage(imageUrl, sortOrder));
+            _images.Add(new ProductImage(
+                imageUrl,
+                sortOrder,
+                visualEmbedding,
+                visualEmbeddingVersion));
         }
 
-        public void UpdateImage(int imageId, string imageUrl, int sortOrder)
+        public void UpdateImage(
+            int imageId,
+            string imageUrl,
+            int sortOrder,
+            byte[]? visualEmbedding = null,
+            string? visualEmbeddingVersion = null)
         {
             var image = _images.FirstOrDefault(x => x.Id == imageId);
             if (image is null)
                 throw new DomainException($"Image with id {imageId} not found.");
 
-            image.Update(imageUrl, sortOrder);
+            image.Update(imageUrl, sortOrder, visualEmbedding, visualEmbeddingVersion);
         }
 
         public void DeactivateImage(int imageId)
@@ -225,6 +246,42 @@ namespace Lamie.Domain.Entities
             SynchronizeRelation(_occasions, occasionIds, item => item.OccasionId, AddOccasion);
         }
 
+        public void ReplaceSimilarProductIds(IEnumerable<int> productIds)
+        {
+            var ids = productIds.Distinct().ToArray();
+            if (ids.Any(id => id <= 0))
+                throw new DomainException("Similar product ids must be greater than 0");
+            if (Id > 0 && ids.Contains(Id))
+                throw new DomainException("A product cannot be similar to itself");
+
+            var requested = ids.ToHashSet();
+            _similarProducts.RemoveAll(item => !requested.Contains(item.SimilarProductId));
+            var existing = _similarProducts.Select(item => item.SimilarProductId).ToHashSet();
+            foreach (var id in ids.Where(id => !existing.Contains(id)))
+                _similarProducts.Add(new ProductSimilarProduct(id));
+        }
+
+        public void ReplaceIngredients(IEnumerable<ProductIngredientDefinition> definitions)
+        {
+            var requested = definitions.ToList();
+            if (requested.GroupBy(item => item.IngredientId).Any(group => group.Count() > 1))
+                throw new DomainException("Product ingredient ids must be unique");
+
+            var requestedIds = requested.Select(item => item.IngredientId).ToHashSet();
+            _ingredients.RemoveAll(item => !requestedIds.Contains(item.IngredientId));
+
+            foreach (var definition in requested)
+            {
+                var existing = _ingredients.FirstOrDefault(item => item.IngredientId == definition.IngredientId);
+                if (existing is null)
+                    _ingredients.Add(new ProductIngredient(definition));
+                else
+                    existing.Update(definition);
+            }
+        }
+
+        public void SetVisibilityOnFE(bool isVisible) => IsVisibleOnFE = isVisible;
+
         private static void SynchronizeRelation<TRelation>(
             List<TRelation> current,
             IEnumerable<int> requestedIds,
@@ -272,9 +329,23 @@ namespace Lamie.Domain.Entities
             Price = newPrice;
         }
 
-        public void SetThumbnail(string? url)
+        public void SetThumbnail(
+            string? url,
+            byte[]? visualEmbedding = null,
+            string? visualEmbeddingVersion = null)
         {
+            if (string.Equals(ThumbnailUrl, url, StringComparison.OrdinalIgnoreCase)
+                && visualEmbedding is null)
+            {
+                ThumbnailUrl = url;
+                return;
+            }
+
             ThumbnailUrl = url;
+            ThumbnailVisualEmbedding = visualEmbedding;
+            ThumbnailVisualEmbeddingVersion = visualEmbedding is null
+                ? null
+                : visualEmbeddingVersion;
         }
 
         public void ReserveStock(int quantity)

@@ -45,6 +45,21 @@ public sealed class OrderDomainTests
         Assert.Equal("Rose bouquet", order.Items.First().ProductName);
     }
 
+    [Theory]
+    [InlineData(0, false, PaymentStatus.Unpaid)]
+    [InlineData(100, false, PaymentStatus.Deposited)]
+    [InlineData(0, true, PaymentStatus.Paid)]
+    [InlineData(100, true, PaymentStatus.Paid)]
+    public void Initial_payment_status_uses_paid_flag_then_deposit(
+        decimal deposit,
+        bool isPaid,
+        PaymentStatus expected)
+    {
+        var order = CreateOrder(deposit: deposit, isPaid: isPaid);
+
+        Assert.Equal(expected, order.PaymentStatus);
+    }
+
     [Fact]
     public void SourceStateMachineAllowsOnlyAdjacentTransitionsAndTerminalStates()
     {
@@ -171,6 +186,20 @@ public sealed class OrderDomainTests
         Assert.Equal("Use white paper", order.Items.Single().Note);
         Assert.Equal(300, order.SubTotal);
         Assert.Equal(325, order.TotalAmount);
+    }
+
+    [Fact]
+    public void Editing_paid_checkbox_recalculates_payment_status_with_zero_deposit()
+    {
+        var order = CreateOrder();
+        var itemId = order.Items.Single().Id;
+        var item = new OrderItemUpdate(itemId, new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 100, 1));
+
+        order.Update(Channel.AdminId, null, CreateDetails(), [item], Baseline.AddMinutes(1), null, "tester", true);
+        Assert.Equal(PaymentStatus.Paid, order.PaymentStatus);
+
+        order.Update(Channel.AdminId, null, CreateDetails(), [item], Baseline.AddMinutes(2), null, "tester", false);
+        Assert.Equal(PaymentStatus.Unpaid, order.PaymentStatus);
     }
 
     [Theory]
@@ -501,7 +530,8 @@ public sealed class OrderDomainTests
     private static Order CreateOrder(
         decimal deposit = 0,
         decimal shipping = 10,
-        IEnumerable<OrderItemSnapshot>? items = null) =>
+        IEnumerable<OrderItemSnapshot>? items = null,
+        bool isPaid = false) =>
         new(
             "ORD-20260728-ABC123",
             Channel.AdminId,
@@ -510,7 +540,8 @@ public sealed class OrderDomainTests
             items ?? [new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 100, 1)],
             Baseline,
             null,
-            "tester");
+            "tester",
+            isPaid);
 
     private static OrderDetails CreateDetails() => new(
         "Orderer",

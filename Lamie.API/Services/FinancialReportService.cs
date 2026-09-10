@@ -47,7 +47,8 @@ public sealed class FinancialReportService : IFinancialReportService
             .Select(group => new
             {
                 Date = group.Key,
-                Revenue = group.Sum(order => order.TotalAmount),
+                ProductRevenue = group.Sum(order => order.SubTotal - order.DiscountTotal),
+                ShippingFee = group.Sum(order => (decimal?)order.ShippingFee) ?? 0,
                 OrderCount = group.Count()
             })
             .ToListAsync(cancellationToken);
@@ -84,14 +85,16 @@ public sealed class FinancialReportService : IFinancialReportService
 
         var revenueByDate = revenueRows.ToDictionary(
             row => DateOnly.FromDateTime(row.Date),
-            row => new DailyRevenue(row.Revenue, row.OrderCount));
+            row => new DailyRevenue(row.ProductRevenue, row.ShippingFee, row.OrderCount));
         var expenseByDate = expenseRows.ToDictionary(
             row => row.Date,
             row => new DailyExpense(row.Expense, row.ExpenseCount));
         var points = period.GroupBy == "month"
-            ? BuildMonthlyPoints(period.From, period.To, revenueByDate, expenseByDate)
-            : BuildDailyPoints(period.From, period.To, revenueByDate, expenseByDate);
+            ? BuildMonthlyPoints(period.From, period.To, revenueByDate, expenseByDate, query.IncludeShippingFeeInRevenue)
+            : BuildDailyPoints(period.From, period.To, revenueByDate, expenseByDate, query.IncludeShippingFeeInRevenue);
         var revenue = points.Sum(point => point.Revenue);
+        var productRevenue = points.Sum(point => point.ProductRevenue);
+        var shippingFee = points.Sum(point => point.ShippingFee);
         var totalExpense = points.Sum(point => point.Expense);
         var profit = revenue - totalExpense;
         decimal? margin = revenue == 0
@@ -113,8 +116,15 @@ public sealed class FinancialReportService : IFinancialReportService
                 row.Name,
                 row.TotalAmount,
                 row.ExpenseCount)).ToList(),
-            "Doanh thu gồm đơn đã thanh toán, không bị hủy, theo ngày giao hàng tại múi giờ Việt Nam.",
-            "Lợi nhuận trong báo cáo bằng doanh thu trừ chi phí đã ghi nhận; chưa bao gồm giá vốn chưa được nhập vào hệ thống.");
+            query.IncludeShippingFeeInRevenue
+                ? "Doanh thu gồm tiền sản phẩm sau giảm giá và phí giao hàng của đơn đã thanh toán, không bị hủy, theo ngày giao hàng tại múi giờ Việt Nam."
+                : "Doanh thu chỉ gồm tiền sản phẩm sau giảm giá của đơn đã thanh toán, không bị hủy, theo ngày giao hàng tại múi giờ Việt Nam; phí giao hàng được trình bày riêng.",
+            "Lợi nhuận trong báo cáo bằng doanh thu theo lựa chọn hiện tại trừ chi phí đã ghi nhận; chưa bao gồm giá vốn chưa được nhập vào hệ thống.")
+        {
+            ProductRevenue = productRevenue,
+            ShippingFee = shippingFee,
+            IncludeShippingFeeInRevenue = query.IncludeShippingFeeInRevenue
+        };
     }
 
     public static FinancialReportPeriodDto ResolveRange(FinancialReportQuery query, DateOnly today)
@@ -166,7 +176,8 @@ public sealed class FinancialReportService : IFinancialReportService
         DateOnly rangeStart,
         DateOnly rangeEnd,
         IReadOnlyDictionary<DateOnly, DailyRevenue> revenueByDate,
-        IReadOnlyDictionary<DateOnly, DailyExpense> expenseByDate)
+        IReadOnlyDictionary<DateOnly, DailyExpense> expenseByDate,
+        bool includeShippingFeeInRevenue)
     {
         var points = new List<FinancialReportPointDto>();
         for (var date = rangeStart; date <= rangeEnd; date = date.AddDays(1))
@@ -178,7 +189,8 @@ public sealed class FinancialReportService : IFinancialReportService
                 date,
                 date.ToString("dd/MM", CultureInfo.InvariantCulture),
                 revenue,
-                expense));
+                expense,
+                includeShippingFeeInRevenue));
         }
 
         return points;
@@ -188,7 +200,8 @@ public sealed class FinancialReportService : IFinancialReportService
         DateOnly rangeStart,
         DateOnly rangeEnd,
         IReadOnlyDictionary<DateOnly, DailyRevenue> revenueByDate,
-        IReadOnlyDictionary<DateOnly, DailyExpense> expenseByDate)
+        IReadOnlyDictionary<DateOnly, DailyExpense> expenseByDate,
+        bool includeShippingFeeInRevenue)
     {
         var points = new List<FinancialReportPointDto>();
         for (var month = new DateOnly(rangeStart.Year, rangeStart.Month, 1);
@@ -200,7 +213,9 @@ public sealed class FinancialReportService : IFinancialReportService
             var bucketEnd = monthEnd > rangeEnd ? rangeEnd : monthEnd;
             var revenue = new DailyRevenue(
                 revenueByDate.Where(item => item.Key >= bucketStart && item.Key <= bucketEnd)
-                    .Sum(item => item.Value.Amount),
+                    .Sum(item => item.Value.ProductRevenue),
+                revenueByDate.Where(item => item.Key >= bucketStart && item.Key <= bucketEnd)
+                    .Sum(item => item.Value.ShippingFee),
                 revenueByDate.Where(item => item.Key >= bucketStart && item.Key <= bucketEnd)
                     .Sum(item => item.Value.Count));
             var expense = new DailyExpense(
@@ -213,7 +228,8 @@ public sealed class FinancialReportService : IFinancialReportService
                 bucketEnd,
                 month.ToString("MM/yyyy", CultureInfo.InvariantCulture),
                 revenue,
-                expense));
+                expense,
+                includeShippingFeeInRevenue));
         }
 
         return points;
@@ -224,9 +240,12 @@ public sealed class FinancialReportService : IFinancialReportService
         DateOnly rangeEnd,
         string label,
         DailyRevenue? revenue,
-        DailyExpense? expense)
+        DailyExpense? expense,
+        bool includeShippingFeeInRevenue)
     {
-        var revenueAmount = revenue?.Amount ?? 0;
+        var productRevenue = revenue?.ProductRevenue ?? 0;
+        var shippingFee = revenue?.ShippingFee ?? 0;
+        var revenueAmount = productRevenue + (includeShippingFeeInRevenue ? shippingFee : 0);
         var expenseAmount = expense?.Amount ?? 0;
         return new FinancialReportPointDto(
             rangeStart,
@@ -236,9 +255,13 @@ public sealed class FinancialReportService : IFinancialReportService
             expenseAmount,
             revenueAmount - expenseAmount,
             revenue?.Count ?? 0,
-            expense?.Count ?? 0);
+            expense?.Count ?? 0)
+        {
+            ProductRevenue = productRevenue,
+            ShippingFee = shippingFee
+        };
     }
 
-    private sealed record DailyRevenue(decimal Amount, int Count);
+    private sealed record DailyRevenue(decimal ProductRevenue, decimal ShippingFee, int Count);
     private sealed record DailyExpense(decimal Amount, int Count);
 }

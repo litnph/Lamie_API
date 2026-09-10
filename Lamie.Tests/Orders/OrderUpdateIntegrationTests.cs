@@ -15,6 +15,88 @@ namespace Lamie.Tests.Orders;
 public sealed class OrderUpdateIntegrationTests
 {
     [Fact]
+    public async Task SameProductLinesKeepIndependentIngredientSnapshotsWhenProductRecipeChanges()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-SNAPSHOT", 0, false, 100_000));
+        var unit = new MeasurementUnit("STEM", "Cành", "cành", false, true, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.MeasurementUnits.Add(unit);
+        await environment.DbContext.SaveChangesAsync();
+        var ingredient = new Ingredient("ROSE_RED", "Hoa hồng đỏ", unit.Id, null, true, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.Ingredients.Add(ingredient);
+        await environment.DbContext.SaveChangesAsync();
+        var product = await environment.DbContext.Products.SingleAsync();
+        product.ReplaceIngredients([new ProductIngredientDefinition(ingredient.Id, 10, null, 0)]);
+        await environment.DbContext.SaveChangesAsync();
+        environment.DbContext.ChangeTracker.Clear();
+
+        var created = await environment.Service.CreateAsync(new CreateOrderForm
+        {
+            OrdererName = "Orderer",
+            RecipientName = "Recipient",
+            RecipientPhone = "0900000000",
+            PickupAtShop = true,
+            DeliveryAt = TestEnvironment.Now.AddDays(1),
+            Items =
+            [
+                new OrderLineRequest { ProductId = product.Id.ToString(), ProductName = "Rose", UnitPrice = 100_000, Quantity = 1 },
+                new OrderLineRequest { ProductId = product.Id.ToString(), ProductName = "Rose", UnitPrice = 100_000, Quantity = 1 }
+            ]
+        }, CancellationToken.None);
+        Assert.All(created.Items, item => Assert.Equal(10, Assert.Single(item.IngredientSnapshots).PerProductBaseQuantity));
+        Assert.NotEqual(created.Items[0].IngredientSnapshots.Single().Id, created.Items[1].IngredientSnapshots.Single().Id);
+
+        product = await environment.DbContext.Products.Include(item => item.Ingredients).SingleAsync();
+        product.ReplaceIngredients([new ProductIngredientDefinition(ingredient.Id, 12, null, 0)]);
+        await environment.DbContext.SaveChangesAsync();
+        environment.DbContext.ChangeTracker.Clear();
+        var update = CreateUpdateForm(created, product, 1, overrides: new UpdateOverrides
+        {
+            Items =
+            [
+                new OrderLineRequest
+                {
+                    Id = created.Items[0].Id.ToString(), ProductId = product.Id.ToString(), ProductName = "Rose",
+                    UnitPrice = 100_000, Quantity = 2
+                },
+                new OrderLineRequest
+                {
+                    Id = created.Items[1].Id.ToString(), ProductId = product.Id.ToString(), ProductName = "Rose",
+                    UnitPrice = 100_000, Quantity = 1, IngredientsSpecified = true,
+                    Ingredients = [new OrderLineIngredientRequest { IngredientId = ingredient.Id, BaseQuantity = 7, SortOrder = 0 }]
+                }
+            ]
+        });
+
+        var updated = await environment.Service.UpdateAsync(created.Id, update, CancellationToken.None);
+
+        Assert.Equal(10, updated.Items[0].IngredientSnapshots.Single().PerProductBaseQuantity);
+        Assert.Equal(20, updated.Items[0].IngredientSnapshots.Single().TotalBaseQuantity);
+        Assert.Equal(7, updated.Items[1].IngredientSnapshots.Single().PerProductBaseQuantity);
+        Assert.Equal(7, updated.Items[1].IngredientSnapshots.Single().TotalBaseQuantity);
+
+        var cleared = await environment.Service.UpdateAsync(created.Id, CreateUpdateForm(updated, product, 1, overrides: new UpdateOverrides
+        {
+            Items =
+            [
+                new OrderLineRequest
+                {
+                    Id = updated.Items[0].Id.ToString(), ProductId = product.Id.ToString(), ProductName = "Rose",
+                    UnitPrice = 100_000, Quantity = 2, IngredientsSpecified = true, Ingredients = []
+                },
+                new OrderLineRequest
+                {
+                    Id = updated.Items[1].Id.ToString(), ProductId = product.Id.ToString(), ProductName = "Rose",
+                    UnitPrice = 100_000, Quantity = 1
+                }
+            ]
+        }), CancellationToken.None);
+
+        Assert.Empty(cleared.Items[0].IngredientSnapshots);
+        Assert.Equal(7, cleared.Items[1].IngredientSnapshots.Single().PerProductBaseQuantity);
+    }
+
+    [Fact]
     public async Task CreatedOrderUpdatePersistsCustomerDeliveryItemNoteImageAndServerTotals()
     {
         await using var environment = await TestEnvironment.CreateAsync(

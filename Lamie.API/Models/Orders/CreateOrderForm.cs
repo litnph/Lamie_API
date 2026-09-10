@@ -29,6 +29,7 @@ public sealed class CreateOrderForm
     public DateTimeOffset DeliveryAt { get; init; }
     public DateTimeOffset? DeliveryTo { get; init; }
     public decimal? DepositAmount { get; init; }
+    public bool IsPaid { get; init; }
     public decimal ShippingFee { get; init; }
     public string? Description { get; init; }
     public string? ContentNote { get; init; }
@@ -75,6 +76,7 @@ public sealed class UpdateOrderForm
     public DateTimeOffset DeliveryAt { get; init; }
     public DateTimeOffset? DeliveryTo { get; init; }
     public decimal DepositAmount { get; init; }
+    public bool? IsPaid { get; init; }
     public decimal ShippingFee { get; init; }
     public decimal? ShippingFeeActual { get; init; }
     public string? Description { get; init; }

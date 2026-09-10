@@ -12,7 +12,7 @@ namespace Lamie.Tests.Orders;
 public sealed class OrderServiceIntegrationTests
 {
     [Fact]
-    public async Task DefaultListSortsByDeliveryTimeAndDeleteRemovesTheAggregate()
+    public async Task DefaultListPrioritizesUnfinishedOrdersBeforeDeliveryTimeAndDeleteRemovesTheAggregate()
     {
         var databaseName = $"LamieOrderDelete_{Guid.NewGuid():N}";
         var connectionString = $"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;MultipleActiveResultSets=true";
@@ -37,6 +37,9 @@ public sealed class OrderServiceIntegrationTests
                 contentNote: "Send by express carrier",
                 thumbnailUrl: "https://test.local/products/thumbnail.jpg");
             earlier.AddImage(earlier.Items.Single().Id, "https://test.local/orders/illustration.jpg", 0);
+            earlier.ChangeStatus(OrderStatus.Producing, false, now.AddMinutes(1), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Shipping, false, now.AddMinutes(2), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Completed, false, now.AddMinutes(3), null, "integration-test");
             dbContext.Orders.AddRange(later, earlier);
             await dbContext.SaveChangesAsync();
 
@@ -44,12 +47,12 @@ public sealed class OrderServiceIntegrationTests
             var service = new OrderService(dbContext, storage, new HttpContextAccessor(), TimeProvider.System);
             var page = await service.ListAsync(new OrderListQuery(), CancellationToken.None);
 
-            Assert.Equal([earlier.Id, later.Id], page.Items.Select(item => item.Id));
-            Assert.Equal(earlier.DeliveryTo, page.Items[0].DeliveryTo?.UtcDateTime);
-            Assert.True(page.Items[0].ProvinceShipping);
-            Assert.Equal("Send by express carrier", page.Items[0].ContentNote);
-            Assert.Equal("https://test.local/products/thumbnail.jpg", page.Items[0].ImageUrl);
-            Assert.Equal("https://test.local/orders/later-illustration.jpg", page.Items[1].ImageUrl);
+            Assert.Equal([later.Id, earlier.Id], page.Items.Select(item => item.Id));
+            Assert.Equal(earlier.DeliveryTo, page.Items[1].DeliveryTo?.UtcDateTime);
+            Assert.True(page.Items[1].ProvinceShipping);
+            Assert.Equal("Send by express carrier", page.Items[1].ContentNote);
+            Assert.Equal("https://test.local/products/thumbnail.jpg", page.Items[1].ImageUrl);
+            Assert.Equal("https://test.local/orders/later-illustration.jpg", page.Items[0].ImageUrl);
 
             await service.DeleteAsync(earlier.Id, CancellationToken.None);
             dbContext.ChangeTracker.Clear();

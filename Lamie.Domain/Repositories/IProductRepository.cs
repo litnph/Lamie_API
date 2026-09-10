@@ -17,5 +17,9 @@ namespace Lamie.Domain.Repositories
         Task<bool> HasOrderReferencesAsync(int productId, CancellationToken cancellationToken = default);
         Task<bool> SkuExistsAsync(string sku, int? excludingProductId = null, CancellationToken cancellationToken = default) =>
             Task.FromResult(false);
+        Task<IReadOnlySet<int>> ExistingIdsAsync(
+            IEnumerable<int> ids,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlySet<int>>(new HashSet<int>());
     }
 }

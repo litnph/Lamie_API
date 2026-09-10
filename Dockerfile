@@ -26,6 +26,8 @@ RUN apt-get update \
 
 ENV ASPNETCORE_URLS=http://+:8080
 ENV LocalStorage__RootPath=/app/data/uploads
+ENV FeDataExport__AllowedRoot=/app/data \
+    FeDataExport__TargetDirectory=/app/data/fe-data
 EXPOSE 8080
 
 COPY --from=build --chown=$APP_UID:$APP_UID /app/publish .

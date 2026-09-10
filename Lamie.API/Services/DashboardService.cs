@@ -31,7 +31,10 @@ public sealed class DashboardService : IDashboardService
         _timeProvider = timeProvider;
     }
 
-    public async Task<DashboardDto> GetAsync(string period, CancellationToken cancellationToken)
+    public async Task<DashboardDto> GetAsync(
+        string period,
+        bool includeShippingFeeInRevenue,
+        CancellationToken cancellationToken)
     {
         var generatedAt = _timeProvider.GetUtcNow();
         var range = CreatePeriod(period, generatedAt);
@@ -101,12 +104,16 @@ public sealed class DashboardService : IDashboardService
             .Select(group => new
             {
                 Date = group.Key,
-                Revenue = group.Sum(order => order.TotalAmount),
+                ProductRevenue = group.Sum(order => order.SubTotal - order.DiscountTotal),
+                ShippingFee = group.Sum(order => (decimal?)order.ShippingFee) ?? 0,
                 OrderCount = group.Count()
             })
             .ToListAsync(cancellationToken);
-        var revenue = BuildRevenue(range, revenueByDay.Select(item =>
-            new DailyRevenue(item.Date, item.Revenue, item.OrderCount)).ToList());
+        var revenue = BuildRevenue(
+            range,
+            revenueByDay.Select(item =>
+                new DailyRevenue(item.Date, item.ProductRevenue, item.ShippingFee, item.OrderCount)).ToList(),
+            includeShippingFeeInRevenue);
 
         var inventoryStats = await _dbContext.Products
             .AsNoTracking()
@@ -210,7 +217,8 @@ public sealed class DashboardService : IDashboardService
 
     private static DashboardRevenueDto BuildRevenue(
         DashboardPeriodRangeDto range,
-        IReadOnlyCollection<DailyRevenue> dailyRows)
+        IReadOnlyCollection<DailyRevenue> dailyRows,
+        bool includeShippingFeeInRevenue)
     {
         var offset = TimeSpan.FromHours(LocalUtcOffsetHours);
         var currentStartDate = range.CurrentStart.ToOffset(offset).Date;
@@ -235,19 +243,36 @@ public sealed class DashboardService : IDashboardService
             var startLabel = bucketStart.ToString("dd/MM", CultureInfo.InvariantCulture);
             var endLabel = endLabelDate.ToString("dd/MM", CultureInfo.InvariantCulture);
             var key = new DateTimeOffset(bucketStart, offset).ToUniversalTime();
+            var productRevenue = matching.Sum(row => row.ProductRevenue);
+            var shippingFee = matching.Sum(row => row.ShippingFee);
             points.Add(new RevenuePointDto(
                 key,
                 bucketSize == 1 ? startLabel : $"{startLabel} đến {endLabel}",
                 startLabel,
-                matching.Sum(row => row.Revenue),
-                matching.Sum(row => row.OrderCount)));
+                productRevenue + (includeShippingFeeInRevenue ? shippingFee : 0),
+                matching.Sum(row => row.OrderCount))
+            {
+                ProductRevenue = productRevenue,
+                ShippingFee = shippingFee
+            });
         }
 
+        var currentProductRevenue = currentRows.Sum(row => row.ProductRevenue);
+        var currentShippingFee = currentRows.Sum(row => row.ShippingFee);
+        var previousProductRevenue = previousRows.Sum(row => row.ProductRevenue);
+        var previousShippingFee = previousRows.Sum(row => row.ShippingFee);
         return new DashboardRevenueDto(
-            currentRows.Sum(row => row.Revenue),
-            previousRows.Sum(row => row.Revenue),
+            currentProductRevenue + (includeShippingFeeInRevenue ? currentShippingFee : 0),
+            previousProductRevenue + (includeShippingFeeInRevenue ? previousShippingFee : 0),
             currentRows.Sum(row => row.OrderCount),
-            points);
+            points)
+        {
+            CurrentProductRevenue = currentProductRevenue,
+            CurrentShippingFee = currentShippingFee,
+            PreviousProductRevenue = previousProductRevenue,
+            PreviousShippingFee = previousShippingFee,
+            IncludeShippingFeeInRevenue = includeShippingFeeInRevenue
+        };
     }
 
     private static DashboardDeliveryRiskDto ToDeliveryRisk(OrderListItemDto order, string state) => new(
@@ -271,5 +296,9 @@ public sealed class DashboardService : IDashboardService
         order.CreatedAt,
         state);
 
-    private sealed record DailyRevenue(DateTime Date, decimal Revenue, int OrderCount);
+    private sealed record DailyRevenue(
+        DateTime Date,
+        decimal ProductRevenue,
+        decimal ShippingFee,
+        int OrderCount);
 }

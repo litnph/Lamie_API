@@ -91,7 +91,7 @@ public sealed class IntegrationRegressionTests
 
         var migrations = dbContext.Database.GetMigrations().ToArray();
 
-        Assert.Equal(19, migrations.Length);
+        Assert.Equal(27, migrations.Length);
         Assert.Equal(migrations.OrderBy(value => value, StringComparer.Ordinal), migrations);
         Assert.Contains(migrations, value => value.EndsWith("_AddIdentity", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddChannels", StringComparison.Ordinal));
@@ -108,7 +108,15 @@ public sealed class IntegrationRegressionTests
         Assert.Contains(migrations, value => value.EndsWith("_AddNavigationBackend", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_SeedDefaultAdminNavigation", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderItemCardAndBanner", StringComparison.Ordinal));
-        Assert.EndsWith("_AddAdministrativeAddressData", migrations[^1], StringComparison.Ordinal);
+        Assert.Contains(migrations, value => value.EndsWith("_AddAdministrativeAddressData", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddIngredientPlanningAndContentPublishing", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddOrderItemProductTypeSnapshot", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddInventoryManagement", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_SeedInventoryNavigation", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddProductDiscoveryFeatures", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_SeparateDailyPreparationAndInventory", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_ReorganizeAdminWorkspaces", StringComparison.Ordinal));
+        Assert.EndsWith("_AddProductDiscoveryFeatures", migrations[^1], StringComparison.Ordinal);
     }
 
     [Fact]

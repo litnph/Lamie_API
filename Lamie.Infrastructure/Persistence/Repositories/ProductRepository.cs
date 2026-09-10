@@ -34,6 +34,8 @@ namespace Lamie.Infrastructure.Persistence.Repositories
                 .Include(p => p.Collections)
                 .Include(p => p.Styles)
                 .Include(p => p.Occasions)
+                .Include(p => p.Ingredients)
+                .Include(p => p.SimilarProducts)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == id);
         }
@@ -48,6 +50,8 @@ namespace Lamie.Infrastructure.Persistence.Repositories
                 .Include(p => p.Collections)
                 .Include(p => p.Styles)
                 .Include(p => p.Occasions)
+                .Include(p => p.Ingredients)
+                .Include(p => p.SimilarProducts)
                 .AsSplitQuery()
                 .ToListAsync();
         }
@@ -67,6 +71,12 @@ namespace Lamie.Infrastructure.Persistence.Repositories
             _context.ProductTags.RemoveRange(product.Tags);
             _context.ProductStyles.RemoveRange(product.Styles);
             _context.ProductOccasions.RemoveRange(product.Occasions);
+            _context.ProductIngredients.RemoveRange(product.Ingredients);
+            _context.ProductSimilarProducts.RemoveRange(product.SimilarProducts);
+            var inboundSimilarLinks = await _context.ProductSimilarProducts
+                .Where(item => item.SimilarProductId == product.Id)
+                .ToListAsync();
+            _context.ProductSimilarProducts.RemoveRange(inboundSimilarLinks);
             _context.Products.Remove(product);
             await _context.SaveChangesAsync();
         }
@@ -82,5 +92,18 @@ namespace Lamie.Infrastructure.Persistence.Repositories
             _context.Products.AsNoTracking().AnyAsync(
                 product => product.Sku == sku && (!excludingProductId.HasValue || product.Id != excludingProductId.Value),
                 cancellationToken);
+
+        public async Task<IReadOnlySet<int>> ExistingIdsAsync(
+            IEnumerable<int> ids,
+            CancellationToken cancellationToken = default)
+        {
+            var requested = ids.Distinct().ToArray();
+            return (await _context.Products
+                    .AsNoTracking()
+                    .Where(product => requested.Contains(product.Id))
+                    .Select(product => product.Id)
+                    .ToListAsync(cancellationToken))
+                .ToHashSet();
+        }
     }
 }

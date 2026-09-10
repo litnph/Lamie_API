@@ -17,6 +17,23 @@ public sealed record ProductImageDto
     public int SortOrder { get; init; }
 }
 
+public sealed record ProductIngredientInputDto
+{
+    public int IngredientId { get; init; }
+    public decimal BaseQuantity { get; init; }
+    public string? Note { get; init; }
+    public int SortOrder { get; init; }
+}
+
+public sealed record ProductIngredientDto
+{
+    public int Id { get; init; }
+    public int IngredientId { get; init; }
+    public decimal BaseQuantity { get; init; }
+    public string? Note { get; init; }
+    public int SortOrder { get; init; }
+}
+
 public sealed record ProductDetailsDto
 {
     public int Id { get; init; }
@@ -28,6 +45,7 @@ public sealed record ProductDetailsDto
     public int CategoryId { get; init; }
     public int? ProductTypeId { get; init; }
     public bool IsActive { get; init; }
+    public bool IsVisibleOnFE { get; init; }
     public string? ThumbnailUrl { get; init; }
 
     public IReadOnlyList<ProductTranslationDto> Translations { get; init; } = [];
@@ -38,5 +56,7 @@ public sealed record ProductDetailsDto
     public IReadOnlyList<int> CollectionIds { get; init; } = [];
     public IReadOnlyList<int> StyleIds { get; init; } = [];
     public IReadOnlyList<int> OccasionIds { get; init; } = [];
+    public IReadOnlyList<int> SimilarProductIds { get; init; } = [];
+    public IReadOnlyList<ProductIngredientDto> Ingredients { get; init; } = [];
 }
 

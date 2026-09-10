@@ -25,6 +25,15 @@ public static class PermissionNames
     public const string RolesManage = "roles.manage";
     public const string NavigationView = "navigation.view";
     public const string NavigationManage = "navigation.manage";
+    public const string IngredientsView = "ingredients.view";
+    public const string IngredientsManage = "ingredients.manage";
+    public const string ContentView = "content.view";
+    public const string ContentManage = "content.manage";
+    public const string IngredientReportsView = "ingredient-reports.view";
+    public const string InventoryView = "inventory.view";
+    public const string InventoryManage = "inventory.manage";
+    public const string TasksView = "tasks.view";
+    public const string CatalogSettingsView = "catalog-settings.view";
 
     public static readonly IReadOnlyList<PermissionDescriptor> Descriptors =
     [
@@ -48,7 +57,16 @@ public static class PermissionNames
         new(RolesView, "Xem vai trò", "Phân quyền", "Xem vai trò và quyền được cấp."),
         new(RolesManage, "Quản lý vai trò", "Phân quyền", "Tạo, cập nhật và xóa vai trò tùy chỉnh."),
         new(NavigationView, "Xem menu và điều hướng", "Phân quyền", "Xem cấu hình menu và route quản trị."),
-        new(NavigationManage, "Quản lý menu và điều hướng", "Phân quyền", "Tạo, sắp xếp, bật, tắt và ẩn menu quản trị.")
+        new(NavigationManage, "Quản lý menu và điều hướng", "Phân quyền", "Tạo, sắp xếp, bật, tắt và ẩn menu quản trị."),
+        new(IngredientsView, "Xem nguyên liệu", "Nguyên liệu", "Xem đơn vị tính, nguyên liệu, định mức và báo cáo nhu cầu."),
+        new(IngredientsManage, "Quản lý nguyên liệu", "Nguyên liệu", "Tạo, cập nhật và ngừng sử dụng đơn vị tính, nguyên liệu và quy cách."),
+        new(ContentView, "Xem content", "Content", "Xem không gian làm việc và lịch sử content bán hàng."),
+        new(ContentManage, "Quản lý content", "Content", "Tạo, chỉnh sửa và lưu content bán hàng."),
+        new(IngredientReportsView, "Xem báo cáo nguyên liệu", "Nguyên liệu", "Xem nhu cầu nguyên liệu theo ngày giao và trạng thái đơn hàng."),
+        new(InventoryView, "Xem kho tồn", "Kho tồn", "Xem hàng tồn, số lượng, cảnh báo và lịch sử giao dịch."),
+        new(InventoryManage, "Quản lý kho tồn", "Kho tồn", "Tạo vật tư kho, cấu hình size, nhập kho và điều chỉnh usage của đơn hàng."),
+        new(TasksView, "Xem Việc cần làm", "Vận hành", "Mở không gian Việc cần làm; dữ liệu từng tab vẫn yêu cầu quyền nghiệp vụ tương ứng."),
+        new(CatalogSettingsView, "Xem Cài đặt danh mục", "Cấu hình", "Mở không gian Cài đặt danh mục; từng nhóm dữ liệu vẫn yêu cầu quyền riêng.")
     ];
 
     public static readonly IReadOnlyCollection<string> All = Descriptors.Select(item => item.Code).ToArray();
@@ -84,7 +102,16 @@ public static class BuiltInRolePermissionDefaults
             PermissionNames.SettingsManage,
             PermissionNames.ExpensesView,
             PermissionNames.ExpensesManage,
-            PermissionNames.ReportsView
+            PermissionNames.ReportsView,
+            PermissionNames.IngredientsView,
+            PermissionNames.IngredientsManage,
+            PermissionNames.ContentView,
+            PermissionNames.ContentManage,
+            PermissionNames.IngredientReportsView,
+            PermissionNames.InventoryView,
+            PermissionNames.InventoryManage,
+            PermissionNames.TasksView,
+            PermissionNames.CatalogSettingsView
         ],
         BuiltInRole.Staff =>
         [
@@ -97,7 +124,13 @@ public static class BuiltInRolePermissionDefaults
             PermissionNames.DashboardView,
             PermissionNames.SettingsView,
             PermissionNames.ExpensesView,
-            PermissionNames.ReportsView
+            PermissionNames.ReportsView,
+            PermissionNames.IngredientsView,
+            PermissionNames.ContentView,
+            PermissionNames.IngredientReportsView,
+            PermissionNames.InventoryView,
+            PermissionNames.TasksView,
+            PermissionNames.CatalogSettingsView
         ],
         _ => Array.Empty<string>()
     };

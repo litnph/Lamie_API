@@ -51,6 +51,23 @@ public sealed class AdminOrderFeatureTests
         Assert.Null(item.BannerMessage);
     }
 
+    [Fact]
+    public void Product_type_snapshot_is_trimmed_and_retained_for_custom_items()
+    {
+        var item = CreateItem(new OrderItemSnapshot(
+            null,
+            null,
+            "Sản phẩm ngoài danh mục",
+            null,
+            500_000m,
+            1,
+            ProductTypeId: 3,
+            ProductTypeName: "  Hoa sáp  "));
+
+        Assert.Equal(3, item.ProductTypeId);
+        Assert.Equal("Hoa sáp", item.ProductTypeName);
+    }
+
     private static OrderItem CreateItem(OrderItemSnapshot snapshot)
     {
         var order = new Order("TEST-1", Channel.AdminId, null,

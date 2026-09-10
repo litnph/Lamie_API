@@ -1,6 +1,22 @@
+using Lamie.Application.Inventory;
 using Lamie.Domain.Entities;
 
 namespace Lamie.Application.Orders;
+
+public sealed record OrderItemIngredientSnapshotDto(
+    Guid Id,
+    int? IngredientId,
+    string IngredientCode,
+    string IngredientName,
+    string BaseUnitCode,
+    string BaseUnitName,
+    string? BaseUnitSymbol,
+    decimal PerProductBaseQuantity,
+    int ProductQuantity,
+    decimal TotalBaseQuantity,
+    string? Note,
+    int SortOrder,
+    DateTimeOffset CapturedAt);
 
 public sealed record OrderItemDto(
     Guid Id,
@@ -16,7 +32,11 @@ public sealed record OrderItemDto(
     string? CardMessage,
     bool HasBanner,
     string? BannerMessage,
-    IReadOnlyList<OrderImageDto> Images);
+    DateTimeOffset? IngredientSnapshotCapturedAt,
+    IReadOnlyList<OrderItemIngredientSnapshotDto> IngredientSnapshots,
+    IReadOnlyList<OrderImageDto> Images,
+    int? ProductTypeId = null,
+    string? ProductTypeName = null);
 
 public sealed record OrderImageDto(Guid Id, Guid? OrderItemId, string ImageUrl, int SortOrder, string? Description);
 
@@ -95,7 +115,8 @@ public sealed record OrderDetailDto(
     string? RowVersion,
     IReadOnlyList<OrderItemDto> Items,
     IReadOnlyList<OrderImageDto> Images,
-    IReadOnlyList<OrderChangeLogDto> ChangeLogs);
+    IReadOnlyList<OrderChangeLogDto> ChangeLogs,
+    IReadOnlyList<OrderMaterialDto>? Materials = null);
 
 public sealed record OrderCalendarItemDto(
     Guid Id,
@@ -173,6 +194,7 @@ public sealed class OrderLineRequest
 {
     public string? Id { get; init; }
     public string? ProductId { get; init; }
+    public int? ProductTypeId { get; init; }
     public string? ProductSku { get; init; }
     public string ProductName { get; init; } = string.Empty;
     public decimal UnitPrice { get; init; }
@@ -182,6 +204,16 @@ public sealed class OrderLineRequest
     public string? CardMessage { get; init; }
     public bool HasBanner { get; init; }
     public string? BannerMessage { get; init; }
+    public bool IngredientsSpecified { get; init; }
+    public List<OrderLineIngredientRequest>? Ingredients { get; init; }
+}
+
+public sealed class OrderLineIngredientRequest
+{
+    public int IngredientId { get; init; }
+    public decimal BaseQuantity { get; init; }
+    public string? Note { get; init; }
+    public int SortOrder { get; init; }
 }
 
 public sealed record ChangeOrderStatusRequest(OrderStatus Status);

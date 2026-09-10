@@ -66,6 +66,44 @@ public sealed class ReferentialIntegrityService : IReferentialIntegrityService
             "Occasion",
             errors,
             cancellationToken);
+        var recipeReferences = references.Ingredients ?? Array.Empty<ProductIngredientReference>();
+        var recipeIngredientIds = recipeReferences.Select(item => item.IngredientId).Distinct().ToArray();
+        var ingredientStates = await (
+                from ingredient in _context.Ingredients.AsNoTracking()
+                join unit in _context.MeasurementUnits.AsNoTracking()
+                    on ingredient.BaseUnitId equals unit.Id
+                where recipeIngredientIds.Contains(ingredient.Id)
+                select new { ingredient.Id, ingredient.IsActive, UnitIsActive = unit.IsActive, unit.AllowsFractional })
+            .ToListAsync(cancellationToken);
+        var existingRecipes = (references.ExistingIngredients ?? Array.Empty<ProductIngredientReference>())
+            .ToDictionary(item => item.IngredientId, item => item.BaseQuantity);
+        var stateById = ingredientStates.ToDictionary(item => item.Id);
+        var invalidIngredientIds = recipeReferences
+            .Where(reference => !stateById.TryGetValue(reference.IngredientId, out var state)
+                || (!(state.IsActive && state.UnitIsActive)
+                    && (!existingRecipes.TryGetValue(reference.IngredientId, out var existingQuantity)
+                        || existingQuantity != reference.BaseQuantity)))
+            .Select(reference => reference.IngredientId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        if (invalidIngredientIds.Length > 0)
+            errors["ingredients"] =
+                [$"Unknown, inactive, or modified inactive ingredient ids: {string.Join(", ", invalidIngredientIds)}"];
+        var wholeNumberIngredientIds = ingredientStates
+            .Where(item => !item.AllowsFractional)
+            .Select(item => item.Id)
+            .ToHashSet();
+        var invalidFractionalIds = recipeReferences
+            .Where(item => wholeNumberIngredientIds.Contains(item.IngredientId)
+                           && item.BaseQuantity != decimal.Truncate(item.BaseQuantity))
+            .Select(item => item.IngredientId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        if (invalidFractionalIds.Length > 0)
+            errors["ingredients"] =
+                [$"These ingredients require whole-number quantities: {string.Join(", ", invalidFractionalIds)}"];
 
         var requestedLanguages = references.LanguageCodes
             .Where(code => !string.IsNullOrWhiteSpace(code))

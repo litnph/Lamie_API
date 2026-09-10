@@ -17,13 +17,24 @@ public sealed record RevenuePointDto(
     string Label,
     string ShortLabel,
     decimal Revenue,
-    int OrderCount);
+    int OrderCount)
+{
+    public decimal ProductRevenue { get; init; }
+    public decimal ShippingFee { get; init; }
+}
 
 public sealed record DashboardRevenueDto(
     decimal CurrentRevenue,
     decimal PreviousRevenue,
     int PaidOrderCount,
-    IReadOnlyList<RevenuePointDto> Points);
+    IReadOnlyList<RevenuePointDto> Points)
+{
+    public decimal CurrentProductRevenue { get; init; }
+    public decimal CurrentShippingFee { get; init; }
+    public decimal PreviousProductRevenue { get; init; }
+    public decimal PreviousShippingFee { get; init; }
+    public bool IncludeShippingFeeInRevenue { get; init; }
+}
 
 public sealed record DashboardDeliveryRiskDto(
     Guid Id,

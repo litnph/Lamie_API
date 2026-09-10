@@ -113,6 +113,23 @@ public sealed class NavigationService : INavigationService
         var authorization = await _permissionResolver.ResolveAsync(userId, cancellationToken);
         var navigation = await _dbContext.Navigation.AsNoTracking().ToListAsync(cancellationToken);
         var accessible = BuildAccessibleSet(navigation, authorization.PermissionCodes, requireVisible: false);
+        var visible = BuildAccessibleSet(navigation, authorization.PermissionCodes, requireVisible: true);
+        var byId = navigation.ToDictionary(item => item.Id);
+
+        string? ActiveMenuKey(AdminNavigation route)
+        {
+            var current = route;
+            var visited = new HashSet<Guid>();
+            while (visited.Add(current.Id))
+            {
+                if (visible.ContainsKey(current.Id) && current.Path is not null)
+                    return current.Key;
+                if (!current.ParentId.HasValue || !byId.TryGetValue(current.ParentId.Value, out var parent))
+                    return null;
+                current = parent;
+            }
+            return null;
+        }
         var routes = accessible.Values
             .Where(item => item.Path is not null && item.ModuleKey is not null && item.PageKey is not null)
             .OrderBy(item => item.Path)
@@ -125,7 +142,8 @@ public sealed class NavigationService : INavigationService
                 item.PageKey!,
                 item.Path!,
                 item.PermissionCode,
-                item.SortOrder))
+                item.SortOrder,
+                ActiveMenuKey(item)))
             .ToArray();
         _cache.SetRoutes(userId, routes);
         return routes;

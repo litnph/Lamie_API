@@ -16,9 +16,11 @@ public sealed class Expense
         decimal amount,
         string description,
         string? notes,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        Guid? stockReceiptId = null)
     {
         Id = Guid.NewGuid();
+        StockReceiptId = stockReceiptId;
         Update(expenseCategoryId, expenseDate, amount, description, notes, nowUtc);
         CreatedAt = nowUtc;
     }
@@ -29,6 +31,7 @@ public sealed class Expense
     public decimal Amount { get; private set; }
     public string Description { get; private set; } = string.Empty;
     public string? Notes { get; private set; }
+    public Guid? StockReceiptId { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 

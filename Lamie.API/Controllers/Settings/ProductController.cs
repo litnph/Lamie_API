@@ -111,6 +111,21 @@ namespace Lamie.API.Controllers
             return NoContent();
         }
 
+        [HttpPatch("{id:int}/fe-visibility")]
+        [Authorize(Policy = PermissionNames.ProductsManage)]
+        public async Task<IActionResult> SetFeVisibility(
+            int id,
+            [FromBody] SetProductVisibilityRequest request,
+            CancellationToken cancellationToken)
+        {
+            await _mediator.Send(
+                new SetProductVisibilityCommand(id, request.IsVisibleOnFE),
+                cancellationToken);
+            return NoContent();
+        }
+
         // Logic sanitize / build path đã được chuyển xuống Application layer (CreateProductHandler)
     }
+
+    public sealed record SetProductVisibilityRequest(bool IsVisibleOnFE);
 }

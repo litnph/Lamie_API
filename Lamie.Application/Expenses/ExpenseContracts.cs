@@ -30,7 +30,8 @@ public sealed record ExpenseDto(
     string Description,
     string? Notes,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? StockReceiptId = null);
 
 public sealed record CreateExpenseRequest(
     Guid ExpenseCategoryId,

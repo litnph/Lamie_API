@@ -5,6 +5,8 @@ public sealed class FinancialReportQuery
     public DateOnly? From { get; init; }
     public DateOnly? To { get; init; }
     public string GroupBy { get; init; } = "auto";
+    // Preserve the pre-existing API meaning of Revenue for callers that do not send the new option.
+    public bool IncludeShippingFeeInRevenue { get; init; } = true;
 }
 
 public sealed record FinancialReportPeriodDto(
@@ -21,7 +23,11 @@ public sealed record FinancialReportPointDto(
     decimal Expense,
     decimal Profit,
     int OrderCount,
-    int ExpenseCount);
+    int ExpenseCount)
+{
+    public decimal ProductRevenue { get; init; }
+    public decimal ShippingFee { get; init; }
+}
 
 public sealed record FinancialReportExpenseCategoryDto(
     Guid ExpenseCategoryId,
@@ -41,7 +47,12 @@ public sealed record FinancialReportDto(
     IReadOnlyList<FinancialReportPointDto> Points,
     IReadOnlyList<FinancialReportExpenseCategoryDto> ExpensesByCategory,
     string RevenueBasis,
-    string ProfitBasis);
+    string ProfitBasis)
+{
+    public decimal ProductRevenue { get; init; }
+    public decimal ShippingFee { get; init; }
+    public bool IncludeShippingFeeInRevenue { get; init; }
+}
 
 public sealed record ReportFileDto(
     byte[] Content,

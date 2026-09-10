@@ -35,6 +35,7 @@ public sealed class FinancialReportTests
     [Fact]
     public void ReportRangeDefaultsToBusinessMonthAndAutomaticallySelectsGranularity()
     {
+        Assert.True(new FinancialReportQuery().IncludeShippingFeeInRevenue);
         var daily = FinancialReportService.ResolveRange(
             new FinancialReportQuery(),
             new DateOnly(2026, 8, 3));
@@ -114,6 +115,8 @@ public sealed class FinancialReportTests
         Assert.Equal("text/html; charset=utf-8", printable.ContentType);
         Assert.Contains("window.print()", html);
         Assert.Contains("&lt;script&gt;", html);
+        Assert.Contains("Tiền sản phẩm", html);
+        Assert.Contains("Phí giao hàng", html);
         Assert.DoesNotContain("<script>alert('x')</script>", html, StringComparison.Ordinal);
     }
 
@@ -134,7 +137,7 @@ public sealed class FinancialReportTests
             var createdOutsidePeriod = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
             var deliveryInsidePeriod = new DateTime(2026, 8, 2, 18, 0, 0, DateTimeKind.Utc);
             var deliveryOutsidePeriod = new DateTime(2026, 8, 3, 17, 0, 0, DateTimeKind.Utc);
-            var paidOrder = CreateOrder("REPORT-PAID", 500000, createdOutsidePeriod, deliveryInsidePeriod);
+            var paidOrder = CreateOrder("REPORT-PAID", 500000, createdOutsidePeriod, deliveryInsidePeriod, 50000);
             paidOrder.ChangePaymentStatus(PaymentStatus.Paid, createdOutsidePeriod.AddMinutes(1), null, "report-test");
             var paidOutsidePeriod = CreateOrder("REPORT-OUTSIDE", 300000, deliveryInsidePeriod, deliveryOutsidePeriod);
             paidOutsidePeriod.ChangePaymentStatus(PaymentStatus.Paid, deliveryInsidePeriod.AddMinutes(1), null, "report-test");
@@ -159,10 +162,14 @@ public sealed class FinancialReportTests
             {
                 From = new DateOnly(2026, 8, 3),
                 To = new DateOnly(2026, 8, 3),
-                GroupBy = "day"
+                GroupBy = "day",
+                IncludeShippingFeeInRevenue = false
             }, CancellationToken.None);
 
             Assert.Equal(500000, report.Revenue);
+            Assert.Equal(500000, report.ProductRevenue);
+            Assert.Equal(50000, report.ShippingFee);
+            Assert.False(report.IncludeShippingFeeInRevenue);
             Assert.Equal(150000, report.Expense);
             Assert.Equal(350000, report.Profit);
             Assert.Equal(70, report.ProfitMarginPercent);
@@ -171,6 +178,20 @@ public sealed class FinancialReportTests
             Assert.Equal(350000, Assert.Single(report.Points).Profit);
             Assert.Equal("Vận chuyển", Assert.Single(report.ExpensesByCategory).ExpenseCategoryName);
             Assert.Contains("ngày giao hàng", report.RevenueBasis);
+
+            var reportIncludingShipping = await service.GetAsync(new FinancialReportQuery
+            {
+                From = new DateOnly(2026, 8, 3),
+                To = new DateOnly(2026, 8, 3),
+                GroupBy = "day",
+                IncludeShippingFeeInRevenue = true
+            }, CancellationToken.None);
+
+            Assert.Equal(550000, reportIncludingShipping.Revenue);
+            Assert.Equal(400000, reportIncludingShipping.Profit);
+            Assert.Equal(500000, reportIncludingShipping.ProductRevenue);
+            Assert.Equal(50000, reportIncludingShipping.ShippingFee);
+            Assert.True(reportIncludingShipping.IncludeShippingFeeInRevenue);
         }
         finally
         {
@@ -182,7 +203,8 @@ public sealed class FinancialReportTests
         string code,
         decimal amount,
         DateTime createdAt,
-        DateTime deliveryAt) => new(
+        DateTime deliveryAt,
+        decimal shippingFee = 0) => new(
         code,
         Channel.AdminId,
         null,
@@ -200,7 +222,7 @@ public sealed class FinancialReportTests
             deliveryAt,
             null,
             0,
-            0,
+            shippingFee,
             null,
             null,
             null),
@@ -222,10 +244,19 @@ public sealed class FinancialReportTests
             70,
             1,
             1,
-            [new FinancialReportPointDto(from, to, "01/08-03/08", 500000, 150000, 350000, 1, 1)],
+            [new FinancialReportPointDto(from, to, "01/08-03/08", 500000, 150000, 350000, 1, 1)
+            {
+                ProductRevenue = 450000,
+                ShippingFee = 50000
+            }],
             [new FinancialReportExpenseCategoryDto(Guid.NewGuid(), categoryName, 150000, 1)],
             "Revenue basis",
-            "Profit basis");
+            "Profit basis")
+        {
+            ProductRevenue = 450000,
+            ShippingFee = 50000,
+            IncludeShippingFeeInRevenue = true
+        };
     }
 
     private static void AssertRoute(string methodName, string template)

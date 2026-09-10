@@ -16,6 +16,7 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<Customer> Customers => Set<Customer>();
         public DbSet<Order> Orders => Set<Order>();
         public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+        public DbSet<OrderItemIngredientSnapshot> OrderItemIngredientSnapshots => Set<OrderItemIngredientSnapshot>();
         public DbSet<OrderImage> OrderImages => Set<OrderImage>();
         public DbSet<OrderChangeLog> OrderChangeLogs => Set<OrderChangeLog>();
         public DbSet<User> Users => Set<User>();
@@ -28,14 +29,30 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
         public DbSet<ProductTranslation> ProductTranslations => Set<ProductTranslation>();
         public DbSet<ProductImage> ProductImages => Set<ProductImage>();
+        public DbSet<ProductSimilarProduct> ProductSimilarProducts => Set<ProductSimilarProduct>();
+        public DbSet<ProductCatalogSettings> ProductCatalogSettings => Set<ProductCatalogSettings>();
         public DbSet<AdministrativeUnit> AdministrativeUnits => Set<AdministrativeUnit>();
         public DbSet<AdministrativeUnitTransition> AdministrativeUnitTransitions => Set<AdministrativeUnitTransition>();
+        public DbSet<ContentFooterSetting> ContentFooterSettings => Set<ContentFooterSetting>();
+        public DbSet<ContentGeneration> ContentGenerations => Set<ContentGeneration>();
+        public DbSet<ContentItem> ContentItems => Set<ContentItem>();
+        public DbSet<ContentAsset> ContentAssets => Set<ContentAsset>();
 
         public DbSet<ProductCollection> ProductCollections => Set<ProductCollection>();
         public DbSet<ProductColor> ProductColors => Set<ProductColor>();
         public DbSet<ProductTag> ProductTags => Set<ProductTag>();
         public DbSet<ProductStyle> ProductStyles => Set<ProductStyle>();
         public DbSet<ProductOccasion> ProductOccasions => Set<ProductOccasion>();
+        public DbSet<ProductIngredient> ProductIngredients => Set<ProductIngredient>();
+        public DbSet<MeasurementUnit> MeasurementUnits => Set<MeasurementUnit>();
+        public DbSet<Ingredient> Ingredients => Set<Ingredient>();
+        public DbSet<IngredientConversion> IngredientConversions => Set<IngredientConversion>();
+        public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+        public DbSet<InventoryStockUnit> InventoryStockUnits => Set<InventoryStockUnit>();
+        public DbSet<StockReceipt> StockReceipts => Set<StockReceipt>();
+        public DbSet<StockReceiptItem> StockReceiptItems => Set<StockReceiptItem>();
+        public DbSet<StockTransaction> StockTransactions => Set<StockTransaction>();
+        public DbSet<OrderMaterial> OrderMaterials => Set<OrderMaterial>();
 
         public DbSet<Tag> Tags => Set<Tag>();
         public DbSet<TagTranslation> TagTranslations => Set<TagTranslation>();
@@ -77,6 +94,10 @@ namespace Lamie.Infrastructure.Persistence
         {
             modelBuilder.ApplyConfiguration(new AdministrativeUnitConfiguration());
             modelBuilder.ApplyConfiguration(new AdministrativeUnitTransitionConfiguration());
+            modelBuilder.ApplyConfiguration(new ContentFooterSettingConfiguration());
+            modelBuilder.ApplyConfiguration(new ContentGenerationConfiguration());
+            modelBuilder.ApplyConfiguration(new ContentItemConfiguration());
+            modelBuilder.ApplyConfiguration(new ContentAssetConfiguration());
 
             modelBuilder.Entity<ExpenseCategory>(entity =>
             {
@@ -99,6 +120,9 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.Notes).HasMaxLength(2000);
                 entity.HasIndex(x => x.ExpenseCategoryId);
                 entity.HasIndex(x => new { x.ExpenseDate, x.ExpenseCategoryId });
+                entity.HasIndex(x => x.StockReceiptId)
+                    .IsUnique()
+                    .HasFilter("[stock_receipt_id] IS NOT NULL");
             });
 
             modelBuilder.Entity<Channel>(entity =>
@@ -383,6 +407,7 @@ namespace Lamie.Infrastructure.Persistence
                 entity.HasKey(x => x.Id);
                 entity.Property(x => x.ProductSku).HasMaxLength(100);
                 entity.Property(x => x.ProductName).HasMaxLength(300);
+                entity.Property(x => x.ProductTypeName).HasMaxLength(200);
                 entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
                 entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
                 entity.Property(x => x.DiscountAmount).HasPrecision(18, 2);
@@ -390,11 +415,38 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.Note).HasMaxLength(1000);
                 entity.Property(x => x.CardMessage).HasMaxLength(1000);
                 entity.Property(x => x.BannerMessage).HasMaxLength(1000);
+                entity.Property(x => x.IngredientSnapshotCapturedAtUtc);
                 entity.HasIndex(x => x.OrderId);
                 entity.HasIndex(x => x.ProductId);
                 entity.HasOne<Product>()
                     .WithMany()
                     .HasForeignKey(x => x.ProductId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.Metadata.FindNavigation(nameof(OrderItem.IngredientSnapshots))!
+                    .SetPropertyAccessMode(PropertyAccessMode.Field);
+                entity.HasMany(x => x.IngredientSnapshots)
+                    .WithOne()
+                    .HasForeignKey(x => x.OrderItemId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<OrderItemIngredientSnapshot>(entity =>
+            {
+                entity.ToTable("sales_order_item_ingredient_snapshots");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.IngredientCode).HasMaxLength(80);
+                entity.Property(x => x.IngredientName).HasMaxLength(200);
+                entity.Property(x => x.BaseUnitCode).HasMaxLength(50);
+                entity.Property(x => x.BaseUnitName).HasMaxLength(120);
+                entity.Property(x => x.BaseUnitSymbol).HasMaxLength(30);
+                entity.Property(x => x.PerProductBaseQuantity).HasPrecision(18, 6);
+                entity.Property(x => x.TotalBaseQuantity).HasPrecision(18, 6);
+                entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.HasIndex(x => new { x.OrderItemId, x.SortOrder });
+                entity.HasIndex(x => x.IngredientId);
+                entity.HasOne<Ingredient>()
+                    .WithMany()
+                    .HasForeignKey(x => x.IngredientId)
                     .OnDelete(DeleteBehavior.Restrict);
             });
 
@@ -447,7 +499,15 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.CategoryId).HasColumnName("category_id");
                 entity.Property(x => x.ProductTypeId).HasColumnName("product_type_id");
                 entity.Property(x => x.IsActive).HasColumnName("is_active");
+                entity.Property(x => x.IsVisibleOnFE).HasColumnName("is_visible_on_fe");
+                entity.Property(x => x.ThumbnailVisualEmbedding)
+                      .HasColumnName("thumbnail_visual_embedding")
+                      .HasMaxLength(4096);
+                entity.Property(x => x.ThumbnailVisualEmbeddingVersion)
+                      .HasColumnName("thumbnail_visual_embedding_version")
+                      .HasMaxLength(80);
                 entity.HasIndex(x => new { x.IsActive, x.Stock });
+                entity.HasIndex(x => new { x.IsVisibleOnFE, x.IsActive });
                 entity.Property(x => x.RowVersion).IsRowVersion();
 
                 entity.HasIndex(x => x.Sku).IsUnique();
@@ -475,6 +535,10 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Metadata.FindNavigation(nameof(Product.Styles))!
                     .SetPropertyAccessMode(PropertyAccessMode.Field);
                 entity.Metadata.FindNavigation(nameof(Product.Occasions))!
+                    .SetPropertyAccessMode(PropertyAccessMode.Field);
+                entity.Metadata.FindNavigation(nameof(Product.Ingredients))!
+                    .SetPropertyAccessMode(PropertyAccessMode.Field);
+                entity.Metadata.FindNavigation(nameof(Product.SimilarProducts))!
                     .SetPropertyAccessMode(PropertyAccessMode.Field);
 
                 entity.HasMany(p => p.Translations)
@@ -511,6 +575,183 @@ namespace Lamie.Infrastructure.Persistence
                       .WithOne()
                       .HasForeignKey(r => r.ProductId)
                       .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasMany(p => p.Ingredients)
+                      .WithOne()
+                      .HasForeignKey(r => r.ProductId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasMany(p => p.SimilarProducts)
+                      .WithOne()
+                      .HasForeignKey(r => r.ProductId)
+                      .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<ProductCatalogSettings>(entity =>
+            {
+                entity.ToTable("cat_product_settings");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.PriceDeviationPercent)
+                    .HasColumnName("price_deviation_percent")
+                    .HasPrecision(5, 2);
+                entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
+                entity.HasData(new
+                {
+                Id = Lamie.Domain.Entities.ProductCatalogSettings.SingletonId,
+                PriceDeviationPercent = Lamie.Domain.Entities.ProductCatalogSettings.DefaultPriceDeviationPercent,
+                    UpdatedAt = new DateTime(2026, 9, 4, 0, 0, 0, DateTimeKind.Utc)
+                });
+            });
+
+            modelBuilder.Entity<MeasurementUnit>(entity =>
+            {
+                entity.ToTable("md_measurement_units");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(50);
+                entity.Property(x => x.Name).HasMaxLength(120);
+                entity.Property(x => x.Symbol).HasMaxLength(30);
+                entity.HasIndex(x => x.Code).IsUnique();
+                entity.HasIndex(x => new { x.IsActive, x.Name });
+            });
+
+            modelBuilder.Entity<Ingredient>(entity =>
+            {
+                entity.ToTable("md_ingredients");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(80);
+                entity.Property(x => x.Name).HasMaxLength(200);
+                entity.Property(x => x.Note).HasMaxLength(2000);
+                entity.HasIndex(x => x.Code).IsUnique();
+                entity.HasIndex(x => new { x.IsActive, x.Name });
+                entity.HasIndex(x => x.BaseUnitId);
+                entity.HasOne<MeasurementUnit>()
+                    .WithMany()
+                    .HasForeignKey(x => x.BaseUnitId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.Metadata.FindNavigation(nameof(Ingredient.Conversions))!
+                    .SetPropertyAccessMode(PropertyAccessMode.Field);
+                entity.HasMany(x => x.Conversions)
+                    .WithOne()
+                    .HasForeignKey(x => x.IngredientId)
+                    .OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<IngredientConversion>(entity =>
+            {
+                entity.ToTable("md_ingredient_conversions");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(80);
+                entity.Property(x => x.Name).HasMaxLength(160);
+                entity.Property(x => x.FactorToBase).HasPrecision(18, 6);
+                entity.HasIndex(x => new { x.IngredientId, x.Code }).IsUnique();
+                entity.HasIndex(x => new { x.IngredientId, x.Name }).IsUnique();
+                entity.HasIndex(x => new { x.IngredientId, x.FactorToBase }).IsUnique();
+                entity.HasIndex(x => new { x.IngredientId, x.SortOrder });
+                entity.HasIndex(x => x.UnitId);
+                entity.HasOne<MeasurementUnit>()
+                    .WithMany()
+                    .HasForeignKey(x => x.UnitId)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<InventoryStockUnit>(entity =>
+            {
+                entity.ToTable("inv_stock_units");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.SizeName).HasMaxLength(100);
+                entity.Property(x => x.SizeKey).HasMaxLength(100);
+                entity.Property(x => x.Quantity).HasPrecision(18, 6);
+                entity.Property(x => x.LowStockThreshold).HasPrecision(18, 6);
+                entity.Property(x => x.RowVersion).IsRowVersion();
+                entity.Ignore(x => x.Status);
+                entity.Property(x => x.LegacyIngredientId).HasColumnName("ingredient_id");
+                entity.HasIndex(x => new { x.InventoryItemId, x.SizeKey }).IsUnique();
+                entity.HasIndex(x => new { x.IsActive, x.Quantity, x.LowStockThreshold });
+            });
+
+            modelBuilder.Entity<InventoryItem>(entity =>
+            {
+                entity.ToTable("inv_items");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Code).HasMaxLength(80);
+                entity.Property(x => x.Name).HasMaxLength(200);
+                entity.Property(x => x.Note).HasMaxLength(2000);
+                entity.Property(x => x.RowVersion).IsRowVersion();
+                entity.HasIndex(x => x.Code).IsUnique();
+                entity.HasIndex(x => x.LegacyIngredientId).IsUnique()
+                    .HasFilter("[legacy_ingredient_id] IS NOT NULL");
+                entity.HasIndex(x => new { x.IsActive, x.Name });
+                entity.HasIndex(x => x.MeasurementUnitId);
+            });
+
+            modelBuilder.Entity<StockReceipt>(entity =>
+            {
+                entity.ToTable("inv_stock_receipts");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.ReceiptNumber).HasMaxLength(40);
+                entity.Property(x => x.ClientRequestId).HasMaxLength(120);
+                entity.Property(x => x.ReceivedDate).HasColumnType("date");
+                entity.Property(x => x.Note).HasMaxLength(2000);
+                entity.Property(x => x.InvoiceUrl).HasMaxLength(2048);
+                entity.Property(x => x.InvoiceFileName).HasMaxLength(260);
+                entity.Property(x => x.InvoiceContentType).HasMaxLength(100);
+                entity.HasIndex(x => x.ReceiptNumber).IsUnique();
+                entity.HasIndex(x => x.ClientRequestId).IsUnique();
+                entity.HasIndex(x => new { x.ReceivedDate, x.CreatedAt });
+            });
+
+            modelBuilder.Entity<StockReceiptItem>(entity =>
+            {
+                entity.ToTable("inv_stock_receipt_items");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Quantity).HasPrecision(18, 6);
+                entity.HasIndex(x => new { x.ReceiptId, x.StockUnitId }).IsUnique();
+                entity.HasIndex(x => x.StockUnitId);
+            });
+
+            modelBuilder.Entity<StockTransaction>(entity =>
+            {
+                entity.ToTable("inv_stock_transactions");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Type).HasConversion<int>();
+                entity.Property(x => x.QuantityDelta).HasPrecision(18, 6);
+                entity.Property(x => x.BalanceAfter).HasPrecision(18, 6);
+                entity.Property(x => x.OperationKey).HasMaxLength(180);
+                entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.HasIndex(x => x.OperationKey).IsUnique();
+                entity.HasIndex(x => new { x.StockUnitId, x.CreatedAt });
+                entity.HasIndex(x => x.ReceiptId);
+                entity.HasIndex(x => new { x.OrderId, x.CreatedAt });
+            });
+
+            modelBuilder.Entity<OrderMaterial>(entity =>
+            {
+                entity.ToTable("sales_order_materials");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.LegacyIngredientId).HasColumnName("ingredient_id");
+                entity.Property(x => x.InventoryItemCode).HasColumnName("ingredient_code").HasMaxLength(80);
+                entity.Property(x => x.InventoryItemName).HasColumnName("ingredient_name").HasMaxLength(200);
+                entity.Property(x => x.SizeName).HasMaxLength(100);
+                entity.Property(x => x.UnitName).HasMaxLength(120);
+                entity.Property(x => x.UnitSymbol).HasMaxLength(30);
+                entity.Property(x => x.RequiredQuantity).HasPrecision(18, 6);
+                entity.Property(x => x.DeductedQuantity).HasPrecision(18, 6);
+                entity.HasIndex(x => new { x.OrderId, x.StockUnitId }).IsUnique();
+                entity.HasIndex(x => x.StockUnitId);
+            });
+
+            modelBuilder.Entity<ProductIngredient>(entity =>
+            {
+                entity.ToTable("rel_product_ingredients");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.BaseQuantity).HasPrecision(18, 6);
+                entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.HasIndex(x => new { x.ProductId, x.IngredientId }).IsUnique();
+                entity.HasIndex(x => x.IngredientId);
+                entity.HasOne<Ingredient>()
+                    .WithMany()
+                    .HasForeignKey(x => x.IngredientId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             modelBuilder.Entity<ProductTranslation>(entity =>
@@ -541,6 +782,27 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.ImageUrl).HasColumnName("image_url");
                 entity.Property(x => x.IsActive).HasColumnName("is_active");
                 entity.Property(x => x.SortOrder).HasColumnName("sort_order");
+                entity.Property(x => x.VisualEmbedding)
+                    .HasColumnName("visual_embedding")
+                    .HasMaxLength(4096);
+                entity.Property(x => x.VisualEmbeddingVersion)
+                    .HasColumnName("visual_embedding_version")
+                    .HasMaxLength(80);
+                entity.HasIndex(x => new { x.ProductId, x.IsActive });
+            });
+
+            modelBuilder.Entity<ProductSimilarProduct>(entity =>
+            {
+                entity.ToTable("rel_product_similar_products");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.ProductId).HasColumnName("product_id");
+                entity.Property(x => x.SimilarProductId).HasColumnName("similar_product_id");
+                entity.HasIndex(x => new { x.ProductId, x.SimilarProductId }).IsUnique();
+                entity.HasIndex(x => x.SimilarProductId);
+                entity.HasOne<Product>()
+                    .WithMany()
+                    .HasForeignKey(x => x.SimilarProductId)
+                    .OnDelete(DeleteBehavior.Restrict);
             });
 
             // Product relationships

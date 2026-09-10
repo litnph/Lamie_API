@@ -15,17 +15,20 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
     private readonly IFileStorage _fileStorage;
     private readonly IProductTypeRepository _productTypeRepository;
     private readonly IReferentialIntegrityService _referentialIntegrity;
+    private readonly IProductVisualEmbeddingProvider _visualEmbeddingProvider;
 
     public CreateProductHandler(
         IProductRepository repository,
         IFileStorage fileStorage,
         IProductTypeRepository productTypeRepository,
-        IReferentialIntegrityService referentialIntegrity)
+        IReferentialIntegrityService referentialIntegrity,
+        IProductVisualEmbeddingProvider? visualEmbeddingProvider = null)
     {
         _repository = repository;
         _fileStorage = fileStorage;
         _productTypeRepository = productTypeRepository;
         _referentialIntegrity = referentialIntegrity;
+        _visualEmbeddingProvider = visualEmbeddingProvider ?? new ProductVisualEmbeddingProvider();
     }
 
     public async Task<int> Handle(CreateProductCommand command, CancellationToken cancellationToken)
@@ -39,6 +42,8 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                 ["productTypeId"] = ["ProductTypeId must reference an active product type"]
             });
 
+        await ValidateSimilarProductsAsync(command.SimilarProductIds, cancellationToken);
+
         await _referentialIntegrity.ValidateProductReferencesAsync(
             new ProductReferenceSet(
                 command.CategoryId,
@@ -48,7 +53,10 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                 command.CollectionIds,
                 command.StyleIds,
                 command.OccasionIds,
-                command.Translations.Select(item => item.LanguageCode).ToArray()),
+                command.Translations.Select(item => item.LanguageCode).ToArray(),
+                command.Ingredients.Select(item => new ProductIngredientReference(
+                    item.IngredientId,
+                    item.BaseQuantity)).ToArray()),
             cancellationToken);
 
         var product = new Product(
@@ -58,6 +66,12 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             command.CategoryId,
             command.ProductTypeId,
             command.TracksInventory);
+        product.SetVisibilityOnFE(command.IsVisibleOnFE);
+        product.ReplaceIngredients(command.Ingredients.Select(item => new ProductIngredientDefinition(
+            item.IngredientId,
+            item.BaseQuantity,
+            item.Note,
+            item.SortOrder)));
         if (command.SalePrice.HasValue)
             product.SetSalePrice(command.SalePrice.Value);
 
@@ -80,6 +94,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             product.AddStyle(id);
         foreach (var id in command.OccasionIds.Distinct())
             product.AddOccasion(id);
+        product.ReplaceSimilarProductIds(command.SimilarProductIds);
 
         var uploadedUrls = new List<string>();
         try
@@ -87,6 +102,13 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             if (command.ThumbnailFile is { Length: > 0 })
             {
                 var objectPath = BuildProductObjectPath(sku, command.ThumbnailFile.FileName, "thumbnail");
+                byte[] visualEmbedding;
+                await using (var embeddingSource = command.ThumbnailFile.OpenReadStream())
+                {
+                    visualEmbedding = await _visualEmbeddingProvider.CreateAsync(
+                        embeddingSource,
+                        cancellationToken);
+                }
                 await using var source = command.ThumbnailFile.OpenReadStream();
                 await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, command.ThumbnailFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
@@ -95,7 +117,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                     command.ThumbnailFile.ContentType,
                     cancellationToken);
                 uploadedUrls.Add(url);
-                product.SetThumbnail(url);
+                product.SetThumbnail(url, visualEmbedding, _visualEmbeddingProvider.Version);
             }
             else if (!string.IsNullOrWhiteSpace(command.ThumbnailUrl))
             {
@@ -105,7 +127,11 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             await AddImagesAsync(product, command, sku, uploadedUrls, cancellationToken);
             if (string.IsNullOrWhiteSpace(product.ThumbnailUrl))
             {
-                product.SetThumbnail(product.Images.OrderBy(image => image.SortOrder).FirstOrDefault()?.ImageUrl);
+                var firstImage = product.Images.OrderBy(image => image.SortOrder).FirstOrDefault();
+                product.SetThumbnail(
+                    firstImage?.ImageUrl,
+                    firstImage?.VisualEmbedding,
+                    firstImage?.VisualEmbeddingVersion);
             }
 
             await _repository.AddAsync(product);
@@ -155,6 +181,13 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             if (image.ImageFile is { Length: > 0 })
             {
                 var objectPath = BuildProductObjectPath(sku, image.ImageFile.FileName, $"image-{index}");
+                byte[] visualEmbedding;
+                await using (var embeddingSource = image.ImageFile.OpenReadStream())
+                {
+                    visualEmbedding = await _visualEmbeddingProvider.CreateAsync(
+                        embeddingSource,
+                        cancellationToken);
+                }
                 await using var source = image.ImageFile.OpenReadStream();
                 await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, image.ImageFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
@@ -163,12 +196,34 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                     image.ImageFile.ContentType,
                     cancellationToken);
                 uploadedUrls.Add(url);
-                product.AddImage(url, sortOrder);
+                product.AddImage(
+                    url,
+                    sortOrder,
+                    visualEmbedding,
+                    _visualEmbeddingProvider.Version);
             }
             else if (!string.IsNullOrWhiteSpace(image.ImageUrl))
             {
                 product.AddImage(image.ImageUrl, sortOrder);
             }
+        }
+    }
+
+    private async Task ValidateSimilarProductsAsync(
+        IReadOnlyCollection<int> similarProductIds,
+        CancellationToken cancellationToken)
+    {
+        if (similarProductIds.Count == 0)
+            return;
+
+        var existing = await _repository.ExistingIdsAsync(similarProductIds, cancellationToken);
+        var missing = similarProductIds.Distinct().Where(id => !existing.Contains(id)).ToArray();
+        if (missing.Length > 0)
+        {
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["similarProductIds"] = [$"Products do not exist: {string.Join(", ", missing)}."]
+            });
         }
     }
 

@@ -1,5 +1,7 @@
 using Lamie.Application.Common.Exceptions;
 using Lamie.API.Models.Orders;
+using Lamie.Application.Content;
+using Lamie.Application.FeData;
 using Lamie.Domain.Exceptions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -76,6 +78,10 @@ namespace Lamie.API.Middlewares
                     ConflictException => StatusCodes.Status409Conflict,
                     UnauthorizedException => StatusCodes.Status401Unauthorized,
                     ForbiddenException => StatusCodes.Status403Forbidden,
+                    ContentAiNotConfiguredException => StatusCodes.Status503ServiceUnavailable,
+                    ContentAiProviderException providerException when providerException.IsTemporary => StatusCodes.Status503ServiceUnavailable,
+                    ContentAiProviderException => StatusCodes.Status502BadGateway,
+                    FeDataExportException => StatusCodes.Status422UnprocessableEntity,
                     BusinessRuleException => StatusCodes.Status400BadRequest,
                     _ => StatusCodes.Status400BadRequest
                 };
@@ -85,7 +91,15 @@ namespace Lamie.API.Middlewares
                     success = false,
                     code = ex.Code,
                     message = ex.Message,
-                    errors = ex is ValidationException ve ? ve.Errors : null
+                    errors = ex switch
+                    {
+                        ValidationException validation => (object)validation.Errors,
+                        FeDataExportException export => (object)new Dictionary<string, IReadOnlyList<string>>
+                        {
+                            ["export"] = export.Issues
+                        },
+                        _ => null
+                    }
                 };
 
                 await context.Response.WriteAsJsonAsync(response);

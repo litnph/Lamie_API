@@ -61,6 +61,7 @@ namespace Lamie.Application.Settings.Products.Queries
                 CategoryId = product.CategoryId,
                 ProductTypeId = product.ProductTypeId,
                 IsActive = product.IsActive,
+                IsVisibleOnFE = product.IsVisibleOnFE,
                 ThumbnailUrl = product.ThumbnailUrl,
                 Translations = product.Translations.Select(t => new ProductTranslationDto
                 {
@@ -82,6 +83,21 @@ namespace Lamie.Application.Settings.Products.Queries
                 CollectionIds = product.Collections.Select(x => x.CollectionId).Distinct().ToList(),
                 StyleIds = product.Styles.Select(x => x.StyleId).Distinct().ToList(),
                 OccasionIds = product.Occasions.Select(x => x.OccasionId).Distinct().ToList(),
+                SimilarProductIds = product.SimilarProducts
+                    .Select(x => x.SimilarProductId)
+                    .Distinct()
+                    .ToList(),
+                Ingredients = product.Ingredients
+                    .OrderBy(item => item.SortOrder)
+                    .ThenBy(item => item.Id)
+                    .Select(item => new ProductIngredientDto
+                    {
+                        Id = item.Id,
+                        IngredientId = item.IngredientId,
+                        BaseQuantity = item.BaseQuantity,
+                        Note = item.Note,
+                        SortOrder = item.SortOrder
+                    }).ToList(),
             };
         }
     }

@@ -12,12 +12,14 @@ using SixLabors.ImageSharp.Processing;
 namespace Lamie.Application.Common.Uploads;
 
 /// <summary>
-/// Renders a single compact SKU metadata label on a newly supplied original product image.
+/// Renders a single human-readable SKU identification stamp on a newly supplied product image.
 /// Callers must retain already-saved URLs instead of passing processed output back through this method.
 /// </summary>
 public static class ProductImageWatermarker
 {
-    private const byte BackgroundAlpha = 138;
+    private const byte BackgroundAlpha = 224;
+    // Mirrors FE_Lamie's existing --lamie-mocha-500 brand token (#74645A).
+    private static readonly Rgba32 WatermarkBackground = new(116, 100, 90, BackgroundAlpha);
 
     public static async Task<MemoryStream> ApplyAsync(
         Stream source,
@@ -28,31 +30,44 @@ public static class ProductImageWatermarker
         using var image = await Image.LoadAsync<Rgba32>(source, cancellationToken);
         var text = sku.Trim().ToUpperInvariant();
         if (text.Length == 0)
-            throw new ArgumentException("SKU is required for a product watermark.", nameof(sku));
+            throw new ArgumentException("SKU is required for a product identification stamp.", nameof(sku));
 
         var shortEdge = Math.Min(image.Width, image.Height);
-        var margin = Math.Clamp((int)Math.Round(shortEdge * .02), 5, 36);
-        var fontSize = Math.Clamp((float)(shortEdge * .025), 10f, 28f);
-        var horizontalPadding = Math.Clamp((int)Math.Round(shortEdge * .012), 5, 16);
-        var verticalPadding = Math.Clamp((int)Math.Round(shortEdge * .006), 3, 9);
-        var radius = Math.Clamp((int)Math.Round(shortEdge * .005), 2, 7);
+        var margin = Math.Min(
+            Math.Clamp((int)Math.Round(shortEdge * .025), 4, 48),
+            Math.Max(1, shortEdge / 8));
+        var horizontalPadding = Math.Min(
+            Math.Clamp((int)Math.Round(shortEdge * .022), 6, 32),
+            Math.Max(1, (image.Width - margin * 2) / 4));
+        var verticalPadding = Math.Min(
+            Math.Clamp((int)Math.Round(shortEdge * .012), 4, 18),
+            Math.Max(1, (image.Height - margin * 2) / 4));
+        var radius = Math.Clamp((int)Math.Round(shortEdge * .009), 2, 14);
+        var fontSize = Math.Clamp((float)(shortEdge * .048), 14f, 72f);
         var font = CreateFont(fontSize);
         var textOptions = new TextOptions(font) { KerningMode = KerningMode.Standard };
         var measured = TextMeasurer.MeasureSize(text, textOptions);
         var maximumTextWidth = Math.Max(1, image.Width - margin * 2 - horizontalPadding * 2);
-        if (measured.Width > maximumTextWidth)
+        var maximumTextHeight = Math.Max(1, image.Height - margin * 2 - verticalPadding * 2);
+        var scale = Math.Min(
+            1f,
+            Math.Min(maximumTextWidth / Math.Max(1, measured.Width), maximumTextHeight / Math.Max(1, measured.Height)));
+        if (scale < 1f)
         {
-            fontSize = Math.Max(6f, fontSize * maximumTextWidth / measured.Width);
+            // Fitting takes precedence over a minimum font size: the complete SKU must remain on-image.
+            fontSize = Math.Max(1f, fontSize * scale);
             font = CreateFont(fontSize);
             textOptions = new TextOptions(font) { KerningMode = KerningMode.Standard };
             measured = TextMeasurer.MeasureSize(text, textOptions);
         }
-        var width = Math.Min(image.Width, (int)Math.Ceiling(measured.Width) + horizontalPadding * 2);
-        var height = Math.Min(image.Height, (int)Math.Ceiling(measured.Height) + verticalPadding * 2);
-        var left = Math.Max(0, image.Width - width - margin);
+        var width = Math.Min(image.Width - margin * 2, (int)Math.Ceiling(measured.Width) + horizontalPadding * 2);
+        var height = Math.Min(image.Height - margin * 2, (int)Math.Ceiling(measured.Height) + verticalPadding * 2);
+        width = Math.Max(1, width);
+        height = Math.Max(1, height);
+        var left = Math.Max(0, (image.Width - width) / 2);
         var top = Math.Max(0, image.Height - height - margin);
 
-        FillRoundedRectangle(image, left, top, width, height, radius, new Rgba32(0, 0, 0, BackgroundAlpha));
+        FillRoundedRectangle(image, left, top, width, height, radius, WatermarkBackground);
         var textLeft = left + (width - measured.Width) / 2f;
         var textTop = top + (height - measured.Height) / 2f;
         image.Mutate(context => context.DrawText(text, font, Color.White, new PointF(textLeft, textTop)));
@@ -68,13 +83,13 @@ public static class ProductImageWatermarker
         foreach (var familyName in new[] { "Segoe UI Semibold", "Inter", "Arial", "DejaVu Sans" })
         {
             if (SystemFonts.TryGet(familyName, out var family))
-                return family.CreateFont(size, FontStyle.Regular);
+                return family.CreateFont(size, FontStyle.Bold);
         }
 
         var families = SystemFonts.Families.ToList();
         if (families.Count == 0)
-            throw new InvalidOperationException("No sans-serif font is available for product watermark rendering.");
-        return families[0].CreateFont(size, FontStyle.Regular);
+            throw new InvalidOperationException("No sans-serif font is available for product identification rendering.");
+        return families[0].CreateFont(size, FontStyle.Bold);
     }
 
     private static void FillRoundedRectangle(

@@ -26,6 +26,9 @@ public sealed class DashboardTests
         Assert.NotNull(method);
         var route = Assert.Single(method!.GetCustomAttributes(typeof(HttpGetAttribute), true)) as HttpGetAttribute;
         Assert.Null(route?.Template);
+        var includeShippingParameter = Assert.Single(method.GetParameters(), parameter =>
+            parameter.Name == "includeShippingFeeInRevenue");
+        Assert.True((bool)includeShippingParameter.DefaultValue!);
     }
 
     [Theory]
@@ -94,7 +97,8 @@ public sealed class DashboardTests
             .Select(group => new
             {
                 Date = group.Key,
-                Revenue = group.Sum(order => order.TotalAmount),
+                ProductRevenue = group.Sum(order => order.SubTotal - order.DiscountTotal),
+                ShippingFee = group.Sum(order => (decimal?)order.ShippingFee) ?? 0,
                 OrderCount = group.Count()
             });
 
@@ -107,5 +111,75 @@ public sealed class DashboardTests
         Assert.Contains(productType!.GetIndexes(), index =>
             index.Properties.Select(property => property.Name)
                 .SequenceEqual([nameof(Product.IsActive), nameof(Product.Stock)]));
+    }
+
+    [Fact]
+    public async Task DashboardRevenueAppliesShippingOptionToCurrentComparisonAndPoints()
+    {
+        var databaseName = $"LamieDashboardRevenue_{Guid.NewGuid():N}";
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer($"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;MultipleActiveResultSets=true")
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        await using var dbContext = new AppDbContext(options);
+        var generatedAt = new DateTimeOffset(2026, 8, 28, 10, 0, 0, TimeSpan.Zero);
+
+        try
+        {
+            await dbContext.Database.EnsureCreatedAsync();
+            var createdAt = new DateTime(2026, 8, 27, 4, 0, 0, DateTimeKind.Utc);
+            var order = new Order(
+                "DASHBOARD-REVENUE",
+                Channel.AdminId,
+                null,
+                new OrderDetails(
+                    "Người đặt",
+                    string.Empty,
+                    "Người nhận",
+                    "0912345678",
+                    false,
+                    false,
+                    null,
+                    null,
+                    null,
+                    null,
+                    createdAt.AddDays(1),
+                    null,
+                    0,
+                    50000,
+                    null,
+                    null,
+                    null),
+                [new OrderItemSnapshot(null, null, "Hoa theo yêu cầu", null, 500000, 1)],
+                createdAt,
+                null,
+                "dashboard-test");
+            order.ChangePaymentStatus(PaymentStatus.Paid, createdAt.AddMinutes(1), null, "dashboard-test");
+            dbContext.Orders.Add(order);
+            await dbContext.SaveChangesAsync();
+
+            var service = new DashboardService(dbContext, new FixedTimeProvider(generatedAt));
+            var excludingShipping = await service.GetAsync("7d", false, CancellationToken.None);
+            var includingShipping = await service.GetAsync("7d", true, CancellationToken.None);
+
+            Assert.Equal(500000, excludingShipping.Revenue!.CurrentRevenue);
+            Assert.Equal(500000, excludingShipping.Revenue.CurrentProductRevenue);
+            Assert.Equal(50000, excludingShipping.Revenue.CurrentShippingFee);
+            Assert.False(excludingShipping.Revenue.IncludeShippingFeeInRevenue);
+            Assert.Equal(500000, excludingShipping.Revenue.Points.Sum(point => point.Revenue));
+            Assert.Equal(550000, includingShipping.Revenue!.CurrentRevenue);
+            Assert.Equal(550000, includingShipping.Revenue.Points.Sum(point => point.Revenue));
+            Assert.Equal(500000, includingShipping.Revenue.Points.Sum(point => point.ProductRevenue));
+            Assert.Equal(50000, includingShipping.Revenue.Points.Sum(point => point.ShippingFee));
+        }
+        finally
+        {
+            await dbContext.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => value;
     }
 }

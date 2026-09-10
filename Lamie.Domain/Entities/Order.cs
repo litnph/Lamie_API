@@ -75,7 +75,8 @@ public sealed class Order
         IEnumerable<OrderItemSnapshot> items,
         DateTime nowUtc,
         Guid? actorId,
-        string? actorName)
+        string? actorName,
+        bool isPaid = false)
     {
         if (string.IsNullOrWhiteSpace(orderCode))
             throw new DomainException("Order code is required.");
@@ -96,7 +97,7 @@ public sealed class Order
         UpdatedById = actorId;
         ApplyDetails(details);
         InitializeItems(items);
-        PaymentStatus = DepositAmount > 0 ? PaymentStatus.Deposited : PaymentStatus.Unpaid;
+        PaymentStatus = ResolvePaymentStatus(isPaid, DepositAmount);
         AddChangeLog("Order", "OrderStatus", null, EnumValue(OrderStatus), "Created", actorId, actorName, nowUtc);
     }
 
@@ -161,7 +162,8 @@ public sealed class Order
         IEnumerable<OrderItemUpdate> items,
         DateTime nowUtc,
         Guid? actorId,
-        string? actorName)
+        string? actorName,
+        bool? isPaid = null)
     {
         if (OrderStatus is OrderStatus.Completed or OrderStatus.Cancelled)
             throw new DomainException("Không thể chỉnh sửa đơn hàng đã hoàn tất hoặc đã hủy.");
@@ -180,22 +182,20 @@ public sealed class Order
         var previousPaymentStatus = PaymentStatus;
         ApplyDetails(details);
         var removedImageUrls = SynchronizeItems(requestedItems);
-        if (PaymentStatus != PaymentStatus.Paid)
+        var nextPaymentStatus = ResolvePaymentStatus(isPaid ?? (PaymentStatus == PaymentStatus.Paid), DepositAmount);
+        if (nextPaymentStatus != previousPaymentStatus)
         {
-            PaymentStatus = DepositAmount > 0 ? PaymentStatus.Deposited : PaymentStatus.Unpaid;
-            if (PaymentStatus != previousPaymentStatus)
-            {
-                AddChangeLog(
-                    "Order",
-                    "PaymentStatus",
-                    EnumValue(previousPaymentStatus),
-                    EnumValue(PaymentStatus),
-                    "PaymentChanged",
-                    actorId,
-                    actorName,
-                    nowUtc,
-                    "Payment state synchronized with the edited deposit amount.");
-            }
+            PaymentStatus = nextPaymentStatus;
+            AddChangeLog(
+                "Order",
+                "PaymentStatus",
+                EnumValue(previousPaymentStatus),
+                EnumValue(PaymentStatus),
+                "PaymentChanged",
+                actorId,
+                actorName,
+                nowUtc,
+                "Payment state synchronized with the paid flag and edited deposit amount.");
         }
         UpdatedAt = nowUtc;
         UpdatedById = actorId;
@@ -261,6 +261,15 @@ public sealed class Order
         UpdatedAt = nowUtc;
         UpdatedById = actorId;
         AddChangeLog("Order", "PaymentStatus", EnumValue(previous), EnumValue(target), "PaymentChanged", actorId, actorName, nowUtc, note);
+    }
+
+    public void TouchMaterialConfiguration(DateTime nowUtc, Guid? actorId)
+    {
+        EnsureUtc(nowUtc, "Current time");
+        if (OrderStatus is OrderStatus.Completed or OrderStatus.Cancelled)
+            throw new DomainException("Materials cannot be changed after an order is completed or cancelled.");
+        UpdatedAt = nowUtc;
+        UpdatedById = actorId;
     }
 
     private void ApplyDetails(OrderDetails details)
@@ -445,6 +454,9 @@ public sealed class Order
 
     private static decimal Money(decimal value) =>
         decimal.Round(value, 2, MidpointRounding.AwayFromZero);
+
+    private static PaymentStatus ResolvePaymentStatus(bool isPaid, decimal depositAmount) =>
+        isPaid ? PaymentStatus.Paid : depositAmount > 0 ? PaymentStatus.Deposited : PaymentStatus.Unpaid;
 
     private static string EnumValue<TEnum>(TEnum value) where TEnum : struct, Enum =>
         Convert.ToInt32(value, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture);

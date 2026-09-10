@@ -799,6 +799,289 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.ToTable("md_color_translations", (string)null);
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentAsset", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("content_type");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)")
+                        .HasColumnName("file_name");
+
+                    b.Property<Guid>("GenerationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("generation_id");
+
+                    b.Property<string>("PublicUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("public_url");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.HasKey("Id")
+                        .HasName("pk_content_assets");
+
+                    b.HasIndex("GenerationId", "SortOrder")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_assets_generation_id_sort_order");
+
+                    b.ToTable("content_assets", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentFooterSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Content")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("content");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Hashtags")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("hashtags");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<int>("Platform")
+                        .HasColumnType("int")
+                        .HasColumnName("platform");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_content_footer_settings");
+
+                    b.HasIndex("Platform")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_footer_settings_platform");
+
+                    b.HasIndex("IsActive", "Platform")
+                        .HasDatabaseName("ix_content_footer_settings_is_active_platform");
+
+                    b.ToTable("content_footer_settings", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentGeneration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Brief")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)")
+                        .HasColumnName("brief");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("model");
+
+                    b.Property<Guid?>("ParentGenerationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("parent_generation_id");
+
+                    b.Property<int?>("ProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("product_id");
+
+                    b.Property<string>("ProductImageUrlSnapshot")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("product_image_url_snapshot");
+
+                    b.Property<string>("ProductNameSnapshot")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)")
+                        .HasColumnName("product_name_snapshot");
+
+                    b.Property<string>("PromptVersion")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("prompt_version");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("provider");
+
+                    b.Property<string>("RequestFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)")
+                        .HasColumnName("request_fingerprint");
+
+                    b.Property<DateTime?>("SavedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("saved_at");
+
+                    b.Property<int>("SourceType")
+                        .HasColumnType("int")
+                        .HasColumnName("source_type");
+
+                    b.Property<int>("Status")
+                        .IsConcurrencyToken()
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.Property<string>("StyleId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("style_id");
+
+                    b.Property<string>("StyleName")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)")
+                        .HasColumnName("style_name");
+
+                    b.Property<int>("StyleSeed")
+                        .HasColumnType("int")
+                        .HasColumnName("style_seed");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_content_generations");
+
+                    b.HasIndex("ParentGenerationId")
+                        .HasDatabaseName("ix_content_generations_parent_generation_id");
+
+                    b.HasIndex("CreatedBy", "IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_generations_created_by_idempotency_key")
+                        .HasFilter("[idempotency_key] IS NOT NULL");
+
+                    b.HasIndex("ParentGenerationId", "RequestFingerprint")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_generations_parent_generation_id_request_fingerprint")
+                        .HasFilter("[parent_generation_id] IS NOT NULL AND [request_fingerprint] IS NOT NULL");
+
+                    b.HasIndex("ProductId", "CreatedAt")
+                        .HasDatabaseName("ix_content_generations_product_id_created_at");
+
+                    b.HasIndex("Status", "CreatedAt")
+                        .HasDatabaseName("ix_content_generations_status_created_at");
+
+                    b.ToTable("content_generations", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Body")
+                        .IsRequired()
+                        .HasMaxLength(10000)
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("body");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("FooterSnapshot")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("footer_snapshot");
+
+                    b.Property<string>("FullContent")
+                        .IsRequired()
+                        .HasMaxLength(14000)
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("full_content");
+
+                    b.Property<Guid>("GenerationId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("generation_id");
+
+                    b.Property<string>("HashtagsSnapshot")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("hashtags_snapshot");
+
+                    b.Property<int>("Platform")
+                        .HasColumnType("int")
+                        .HasColumnName("platform");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_content_items");
+
+                    b.HasIndex("Platform")
+                        .HasDatabaseName("ix_content_items_platform");
+
+                    b.HasIndex("GenerationId", "Platform")
+                        .IsUnique()
+                        .HasDatabaseName("ix_content_items_generation_id_platform");
+
+                    b.ToTable("content_items", (string)null);
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Customer", b =>
                 {
                     b.Property<Guid>("Id")
@@ -902,6 +1185,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("notes");
 
+                    b.Property<Guid?>("StockReceiptId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("stock_receipt_id");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("updated_at");
@@ -911,6 +1198,11 @@ namespace Lamie.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("ExpenseCategoryId")
                         .HasDatabaseName("ix_fin_expenses_expense_category_id");
+
+                    b.HasIndex("StockReceiptId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_expenses_stock_receipt_id")
+                        .HasFilter("[stock_receipt_id] IS NOT NULL");
 
                     b.HasIndex("ExpenseDate", "ExpenseCategoryId")
                         .HasDatabaseName("ix_fin_expenses_expense_date_expense_category_id");
@@ -971,6 +1263,278 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.ToTable("fin_expense_categories", (string)null);
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.Ingredient", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BaseUnitId")
+                        .HasColumnType("int")
+                        .HasColumnName("base_unit_id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("note");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_md_ingredients");
+
+                    b.HasIndex("BaseUnitId")
+                        .HasDatabaseName("ix_md_ingredients_base_unit_id");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_md_ingredients_code");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("ix_md_ingredients_is_active_name");
+
+                    b.ToTable("md_ingredients", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.IngredientConversion", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("FactorToBase")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("factor_to_base");
+
+                    b.Property<int>("IngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("nvarchar(160)")
+                        .HasColumnName("name");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.Property<int>("UnitId")
+                        .HasColumnType("int")
+                        .HasColumnName("unit_id");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_md_ingredient_conversions");
+
+                    b.HasIndex("UnitId")
+                        .HasDatabaseName("ix_md_ingredient_conversions_unit_id");
+
+                    b.HasIndex("IngredientId", "Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_md_ingredient_conversions_ingredient_id_code");
+
+                    b.HasIndex("IngredientId", "FactorToBase")
+                        .IsUnique()
+                        .HasDatabaseName("ix_md_ingredient_conversions_ingredient_id_factor_to_base");
+
+                    b.HasIndex("IngredientId", "Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_md_ingredient_conversions_ingredient_id_name");
+
+                    b.HasIndex("IngredientId", "SortOrder")
+                        .HasDatabaseName("ix_md_ingredient_conversions_ingredient_id_sort_order");
+
+                    b.ToTable("md_ingredient_conversions", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.InventoryItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<int?>("LegacyIngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("legacy_ingredient_id");
+
+                    b.Property<int>("MeasurementUnitId")
+                        .HasColumnType("int")
+                        .HasColumnName("measurement_unit_id");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("note");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("row_version");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inv_items");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_items_code");
+
+                    b.HasIndex("LegacyIngredientId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_items_legacy_ingredient_id")
+                        .HasFilter("[legacy_ingredient_id] IS NOT NULL");
+
+                    b.HasIndex("MeasurementUnitId")
+                        .HasDatabaseName("ix_inv_items_measurement_unit_id");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("ix_inv_items_is_active_name");
+
+                    b.ToTable("inv_items", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.InventoryStockUnit", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("inventory_item_id");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<int?>("LegacyIngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<decimal>("LowStockThreshold")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("low_stock_threshold");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("quantity");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("row_version");
+
+                    b.Property<string>("SizeKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("size_key");
+
+                    b.Property<string>("SizeName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("size_name");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inv_stock_units");
+
+                    b.HasIndex("InventoryItemId", "SizeKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_stock_units_inventory_item_id_size_key");
+
+                    b.HasIndex("IsActive", "Quantity", "LowStockThreshold")
+                        .HasDatabaseName("ix_inv_stock_units_is_active_quantity_low_stock_threshold");
+
+                    b.ToTable("inv_stock_units", (string)null);
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Language", b =>
                 {
                     b.Property<string>("Code")
@@ -1015,6 +1579,61 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasName("pk_sys_languages");
 
                     b.ToTable("sys_languages", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MeasurementUnit", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllowsFractional")
+                        .HasColumnType("bit")
+                        .HasColumnName("allows_fractional");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_active");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Symbol")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("symbol");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_md_measurement_units");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_md_measurement_units_code");
+
+                    b.HasIndex("IsActive", "Name")
+                        .HasDatabaseName("ix_md_measurement_units_is_active_name");
+
+                    b.ToTable("md_measurement_units", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Occasion", b =>
@@ -1511,6 +2130,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("has_card");
 
+                    b.Property<DateTime?>("IngredientSnapshotCapturedAtUtc")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("ingredient_snapshot_captured_at_utc");
+
                     b.Property<decimal>("LineTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)")
@@ -1540,6 +2163,15 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(100)")
                         .HasColumnName("product_sku");
 
+                    b.Property<int?>("ProductTypeId")
+                        .HasColumnType("int")
+                        .HasColumnName("product_type_id");
+
+                    b.Property<string>("ProductTypeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("product_type_name");
+
                     b.Property<int>("Quantity")
                         .HasColumnType("int")
                         .HasColumnName("quantity");
@@ -1564,6 +2196,171 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_sales_order_items_product_id");
 
                     b.ToTable("sales_order_items", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderItemIngredientSnapshot", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BaseUnitCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("base_unit_code");
+
+                    b.Property<string>("BaseUnitName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("base_unit_name");
+
+                    b.Property<string>("BaseUnitSymbol")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("base_unit_symbol");
+
+                    b.Property<DateTime>("CapturedAtUtc")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("captured_at_utc");
+
+                    b.Property<string>("IngredientCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("ingredient_code");
+
+                    b.Property<int?>("IngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<string>("IngredientName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("ingredient_name");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrderItemId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("order_item_id");
+
+                    b.Property<decimal>("PerProductBaseQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("per_product_base_quantity");
+
+                    b.Property<int>("ProductQuantity")
+                        .HasColumnType("int")
+                        .HasColumnName("product_quantity");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.Property<decimal>("TotalBaseQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("total_base_quantity");
+
+                    b.HasKey("Id")
+                        .HasName("pk_sales_order_item_ingredient_snapshots");
+
+                    b.HasIndex("IngredientId")
+                        .HasDatabaseName("ix_sales_order_item_ingredient_snapshots_ingredient_id");
+
+                    b.HasIndex("OrderItemId", "SortOrder")
+                        .HasDatabaseName("ix_sales_order_item_ingredient_snapshots_order_item_id_sort_order");
+
+                    b.ToTable("sales_order_item_ingredient_snapshots", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderMaterial", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<decimal>("DeductedQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("deducted_quantity");
+
+                    b.Property<string>("InventoryItemCode")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("ingredient_code");
+
+                    b.Property<Guid>("InventoryItemId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("inventory_item_id");
+
+                    b.Property<string>("InventoryItemName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("ingredient_name");
+
+                    b.Property<int?>("LegacyIngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("order_id");
+
+                    b.Property<decimal>("RequiredQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("required_quantity");
+
+                    b.Property<string>("SizeName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("size_name");
+
+                    b.Property<Guid>("StockUnitId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("stock_unit_id");
+
+                    b.Property<string>("UnitName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("unit_name");
+
+                    b.Property<string>("UnitSymbol")
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("unit_symbol");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_sales_order_materials");
+
+                    b.HasIndex("StockUnitId")
+                        .HasDatabaseName("ix_sales_order_materials_stock_unit_id");
+
+                    b.HasIndex("OrderId", "StockUnitId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_sales_order_materials_order_id_stock_unit_id");
+
+                    b.ToTable("sales_order_materials", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Permission", b =>
@@ -1901,6 +2698,123 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                             Name = "Quản lý menu và điều hướng",
                             SortOrder = 210,
                             UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000022"),
+                            Code = "ingredients.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Xem đơn vị tính, nguyên liệu, định mức và báo cáo nhu cầu.",
+                            Group = "Nguyên liệu",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem nguyên liệu",
+                            SortOrder = 220,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000023"),
+                            Code = "ingredients.manage",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Tạo, cập nhật và ngừng sử dụng đơn vị tính, nguyên liệu và quy cách.",
+                            Group = "Nguyên liệu",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Quản lý nguyên liệu",
+                            SortOrder = 230,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000024"),
+                            Code = "content.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Xem không gian làm việc và lịch sử content bán hàng.",
+                            Group = "Content",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem content",
+                            SortOrder = 240,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000025"),
+                            Code = "content.manage",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Tạo, chỉnh sửa và lưu content bán hàng.",
+                            Group = "Content",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Quản lý content",
+                            SortOrder = 250,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000026"),
+                            Code = "ingredient-reports.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Xem nhu cầu nguyên liệu theo ngày giao và trạng thái đơn hàng.",
+                            Group = "Nguyên liệu",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem báo cáo nguyên liệu",
+                            SortOrder = 260,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000027"),
+                            Code = "inventory.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Xem hàng tồn, số lượng, cảnh báo và lịch sử giao dịch.",
+                            Group = "Kho tồn",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem kho tồn",
+                            SortOrder = 270,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000028"),
+                            Code = "inventory.manage",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Tạo vật tư kho, cấu hình size, nhập kho và điều chỉnh usage của đơn hàng.",
+                            Group = "Kho tồn",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Quản lý kho tồn",
+                            SortOrder = 280,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000029"),
+                            Code = "tasks.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Mở không gian Việc cần làm; dữ liệu từng tab vẫn yêu cầu quyền nghiệp vụ tương ứng.",
+                            Group = "Vận hành",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem Việc cần làm",
+                            SortOrder = 290,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000030"),
+                            Code = "catalog-settings.view",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Mở không gian Cài đặt danh mục; từng nhóm dữ liệu vẫn yêu cầu quyền riêng.",
+                            Group = "Cấu hình",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Xem Cài đặt danh mục",
+                            SortOrder = 300,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
                 });
 
@@ -1932,6 +2846,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit")
                         .HasColumnName("is_active");
+
+                    b.Property<bool>("IsVisibleOnFE")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_visible_on_fe");
 
                     b.Property<decimal>("Price")
                         .HasPrecision(18, 2)
@@ -1968,6 +2886,16 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("thumbnail_url");
 
+                    b.Property<byte[]>("ThumbnailVisualEmbedding")
+                        .HasMaxLength(4096)
+                        .HasColumnType("varbinary(4096)")
+                        .HasColumnName("thumbnail_visual_embedding");
+
+                    b.Property<string>("ThumbnailVisualEmbeddingVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("thumbnail_visual_embedding_version");
+
                     b.Property<bool>("TracksInventory")
                         .HasColumnType("bit")
                         .HasColumnName("tracks_inventory");
@@ -2000,7 +2928,42 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.HasIndex("IsActive", "Stock")
                         .HasDatabaseName("ix_cat_products_is_active_stock");
 
+                    b.HasIndex("IsVisibleOnFE", "IsActive")
+                        .HasDatabaseName("ix_cat_products_is_visible_on_fe_is_active");
+
                     b.ToTable("cat_products", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductCatalogSettings", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("PriceDeviationPercent")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("decimal(5,2)")
+                        .HasColumnName("price_deviation_percent");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_cat_product_settings");
+
+                    b.ToTable("cat_product_settings", (string)null);
+
+                    b.HasData(
+                        new
+                        {
+                            Id = 1,
+                            PriceDeviationPercent = 20m,
+                            UpdatedAt = new DateTime(2026, 9, 4, 0, 0, 0, 0, DateTimeKind.Utc)
+                        });
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.ProductCollection", b =>
@@ -2161,13 +3124,67 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(max)")
                         .HasColumnName("updated_name");
 
+                    b.Property<byte[]>("VisualEmbedding")
+                        .HasMaxLength(4096)
+                        .HasColumnType("varbinary(4096)")
+                        .HasColumnName("visual_embedding");
+
+                    b.Property<string>("VisualEmbeddingVersion")
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)")
+                        .HasColumnName("visual_embedding_version");
+
                     b.HasKey("Id")
                         .HasName("pk_cat_product_images");
 
-                    b.HasIndex("ProductId")
-                        .HasDatabaseName("ix_cat_product_images_product_id");
+                    b.HasIndex("ProductId", "IsActive")
+                        .HasDatabaseName("ix_cat_product_images_product_id_is_active");
 
                     b.ToTable("cat_product_images", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductIngredient", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("BaseQuantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("base_quantity");
+
+                    b.Property<int>("IngredientId")
+                        .HasColumnType("int")
+                        .HasColumnName("ingredient_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("product_id");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.HasKey("Id")
+                        .HasName("pk_rel_product_ingredients");
+
+                    b.HasIndex("IngredientId")
+                        .HasDatabaseName("ix_rel_product_ingredients_ingredient_id");
+
+                    b.HasIndex("ProductId", "IngredientId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_rel_product_ingredients_product_id_ingredient_id");
+
+                    b.ToTable("rel_product_ingredients", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.ProductOccasion", b =>
@@ -2222,6 +3239,60 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_rel_product_occasions_product_id_occasion_id");
 
                     b.ToTable("rel_product_occasions", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductSimilarProduct", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<int?>("CreatedBy")
+                        .HasColumnType("int")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("CreatedName")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("created_name");
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("product_id");
+
+                    b.Property<int>("SimilarProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("similar_product_id");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.Property<int?>("UpdatedBy")
+                        .HasColumnType("int")
+                        .HasColumnName("updated_by");
+
+                    b.Property<string>("UpdatedName")
+                        .HasColumnType("nvarchar(max)")
+                        .HasColumnName("updated_name");
+
+                    b.HasKey("Id")
+                        .HasName("pk_rel_product_similar_products");
+
+                    b.HasIndex("SimilarProductId")
+                        .HasDatabaseName("ix_rel_product_similar_products_similar_product_id");
+
+                    b.HasIndex("ProductId", "SimilarProductId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_rel_product_similar_products_product_id_similar_product_id");
+
+                    b.ToTable("rel_product_similar_products", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.ProductStyle", b =>
@@ -2821,6 +3892,60 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         },
                         new
                         {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000022"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000023"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000024"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000025"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000026"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000027"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000028"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000029"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000030"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
                             RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
                             PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
                             GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
@@ -2911,6 +4036,60 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         },
                         new
                         {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000022"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000023"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000024"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000025"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000026"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000027"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000028"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000029"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000030"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
                             RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
                             PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
                             GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
@@ -2968,7 +4147,219 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                             RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
                             PermissionId = new Guid("10000000-0000-4000-8000-000000000015"),
                             GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000022"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000024"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000026"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000027"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000029"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000003"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000030"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.StockReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ClientRequestId")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)")
+                        .HasColumnName("client_request_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("InvoiceContentType")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("invoice_content_type");
+
+                    b.Property<string>("InvoiceFileName")
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)")
+                        .HasColumnName("invoice_file_name");
+
+                    b.Property<string>("InvoiceUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("invoice_url");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("ReceiptNumber")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)")
+                        .HasColumnName("receipt_number");
+
+                    b.Property<DateOnly>("ReceivedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("received_date");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inv_stock_receipts");
+
+                    b.HasIndex("ClientRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_stock_receipts_client_request_id");
+
+                    b.HasIndex("ReceiptNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_stock_receipts_receipt_number");
+
+                    b.HasIndex("ReceivedDate", "CreatedAt")
+                        .HasDatabaseName("ix_inv_stock_receipts_received_date_created_at");
+
+                    b.ToTable("inv_stock_receipts", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.StockReceiptItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("quantity");
+
+                    b.Property<Guid>("ReceiptId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<Guid>("StockUnitId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("stock_unit_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inv_stock_receipt_items");
+
+                    b.HasIndex("StockUnitId")
+                        .HasDatabaseName("ix_inv_stock_receipt_items_stock_unit_id");
+
+                    b.HasIndex("ReceiptId", "StockUnitId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_stock_receipt_items_receipt_id_stock_unit_id");
+
+                    b.ToTable("inv_stock_receipt_items", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.StockTransaction", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("BalanceAfter")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("balance_after");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<string>("OperationKey")
+                        .IsRequired()
+                        .HasMaxLength(180)
+                        .HasColumnType("nvarchar(180)")
+                        .HasColumnName("operation_key");
+
+                    b.Property<Guid?>("OrderId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("order_id");
+
+                    b.Property<Guid?>("OrderMaterialId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("order_material_id");
+
+                    b.Property<decimal>("QuantityDelta")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("quantity_delta");
+
+                    b.Property<Guid?>("ReceiptId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("receipt_id");
+
+                    b.Property<Guid>("StockUnitId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("stock_unit_id");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_inv_stock_transactions");
+
+                    b.HasIndex("OperationKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_inv_stock_transactions_operation_key");
+
+                    b.HasIndex("ReceiptId")
+                        .HasDatabaseName("ix_inv_stock_transactions_receipt_id");
+
+                    b.HasIndex("OrderId", "CreatedAt")
+                        .HasDatabaseName("ix_inv_stock_transactions_order_id_created_at");
+
+                    b.HasIndex("StockUnitId", "CreatedAt")
+                        .HasDatabaseName("ix_inv_stock_transactions_stock_unit_id_created_at");
+
+                    b.ToTable("inv_stock_transactions", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Style", b =>
@@ -3355,6 +4746,53 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_md_color_translations_sys_languages_language_code");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentAsset", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.ContentGeneration", null)
+                        .WithMany("Assets")
+                        .HasForeignKey("GenerationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_content_assets_content_generations_generation_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentItem", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.ContentGeneration", null)
+                        .WithMany("Items")
+                        .HasForeignKey("GenerationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_content_items_content_generations_generation_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.Ingredient", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.MeasurementUnit", null)
+                        .WithMany()
+                        .HasForeignKey("BaseUnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_md_ingredients_md_measurement_units_base_unit_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.IngredientConversion", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Ingredient", null)
+                        .WithMany("Conversions")
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_md_ingredient_conversions_md_ingredients_ingredient_id");
+
+                    b.HasOne("Lamie.Domain.Entities.MeasurementUnit", null)
+                        .WithMany()
+                        .HasForeignKey("UnitId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_md_ingredient_conversions_md_measurement_units_unit_id");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.OccasionTranslation", b =>
                 {
                     b.HasOne("Lamie.Domain.Entities.Language", null)
@@ -3442,6 +4880,22 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_sales_order_items_products_product_id");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderItemIngredientSnapshot", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Ingredient", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_sales_order_item_ingredient_snapshots_ingredients_ingredient_id");
+
+                    b.HasOne("Lamie.Domain.Entities.OrderItem", null)
+                        .WithMany("IngredientSnapshots")
+                        .HasForeignKey("OrderItemId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_sales_order_item_ingredient_snapshots_sales_order_items_order_item_id");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Product", b =>
                 {
                     b.HasOne("Lamie.Domain.Entities.Category", null)
@@ -3502,6 +4956,23 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_cat_product_images_cat_products_product_id");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductIngredient", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Ingredient", null)
+                        .WithMany()
+                        .HasForeignKey("IngredientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_rel_product_ingredients_md_ingredients_ingredient_id");
+
+                    b.HasOne("Lamie.Domain.Entities.Product", null)
+                        .WithMany("Ingredients")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_rel_product_ingredients_cat_products_product_id");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.ProductOccasion", b =>
                 {
                     b.HasOne("Lamie.Domain.Entities.Occasion", null)
@@ -3517,6 +4988,23 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_rel_product_occasions_cat_products_product_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductSimilarProduct", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Product", null)
+                        .WithMany("SimilarProducts")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_rel_product_similar_products_cat_products_product_id");
+
+                    b.HasOne("Lamie.Domain.Entities.Product", null)
+                        .WithMany()
+                        .HasForeignKey("SimilarProductId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_rel_product_similar_products_cat_products_similar_product_id");
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.ProductStyle", b =>
@@ -3648,6 +5136,18 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Navigation("Translations");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ContentGeneration", b =>
+                {
+                    b.Navigation("Assets");
+
+                    b.Navigation("Items");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.Ingredient", b =>
+                {
+                    b.Navigation("Conversions");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Occasion", b =>
                 {
                     b.Navigation("Translations");
@@ -3662,6 +5162,11 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderItem", b =>
+                {
+                    b.Navigation("IngredientSnapshots");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Product", b =>
                 {
                     b.Navigation("Collections");
@@ -3670,7 +5175,11 @@ namespace Lamie.Infrastructure.Persistence.Migrations
 
                     b.Navigation("Images");
 
+                    b.Navigation("Ingredients");
+
                     b.Navigation("Occasions");
+
+                    b.Navigation("SimilarProducts");
 
                     b.Navigation("Styles");
 

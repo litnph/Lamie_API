@@ -39,6 +39,13 @@ public sealed class OrderApiContractTests
     }
 
     [Fact]
+    public void CreateAndUpdateAcceptThePaidCheckboxAtTheMultipartBoundary()
+    {
+        Assert.Equal(typeof(bool), typeof(CreateOrderForm).GetProperty(nameof(CreateOrderForm.IsPaid))?.PropertyType);
+        Assert.Equal(typeof(bool?), typeof(UpdateOrderForm).GetProperty(nameof(UpdateOrderForm.IsPaid))?.PropertyType);
+    }
+
+    [Fact]
     public void ControllerExposesBatchRouteWithTheSameManagePolicyAsSingleCreate()
     {
         var controllerPolicy = Assert.Single(

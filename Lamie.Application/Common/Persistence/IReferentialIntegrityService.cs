@@ -1,5 +1,7 @@
 namespace Lamie.Application.Common.Persistence;
 
+public sealed record ProductIngredientReference(int IngredientId, decimal BaseQuantity);
+
 public sealed record ProductReferenceSet(
     int CategoryId,
     int ProductTypeId,
@@ -8,7 +10,9 @@ public sealed record ProductReferenceSet(
     IReadOnlyCollection<int> CollectionIds,
     IReadOnlyCollection<int> StyleIds,
     IReadOnlyCollection<int> OccasionIds,
-    IReadOnlyCollection<string> LanguageCodes);
+    IReadOnlyCollection<string> LanguageCodes,
+    IReadOnlyCollection<ProductIngredientReference>? Ingredients = null,
+    IReadOnlyCollection<ProductIngredientReference>? ExistingIngredients = null);
 
 public enum ReferencedMasterData
 {

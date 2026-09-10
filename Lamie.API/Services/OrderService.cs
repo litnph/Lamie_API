@@ -23,17 +23,20 @@ public sealed class OrderService : IOrderService
     private readonly IFileStorage _fileStorage;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly TimeProvider _timeProvider;
+    private readonly IInventoryService? _inventoryService;
 
     public OrderService(
         AppDbContext dbContext,
         IFileStorage fileStorage,
         IHttpContextAccessor httpContextAccessor,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IInventoryService? inventoryService = null)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _httpContextAccessor = httpContextAccessor;
         _timeProvider = timeProvider;
+        _inventoryService = inventoryService;
     }
 
     public async Task<PagedOrdersDto> ListAsync(OrderListQuery request, CancellationToken cancellationToken)
@@ -84,15 +87,17 @@ public sealed class OrderService : IOrderService
         }
 
         var totalCount = await query.CountAsync(cancellationToken);
+        var prioritizedQuery = query.OrderBy(order =>
+            order.OrderStatus == OrderStatus.Completed || order.OrderStatus == OrderStatus.Cancelled ? 1 : 0);
         var orderedQuery = (request.SortBy, request.SortDirection) switch
         {
-            (OrderSortBy.DeliveryAt, SortDirection.Ascending) => query.OrderBy(order => order.DeliveryAt).ThenBy(order => order.OrderCode),
-            (OrderSortBy.DeliveryAt, SortDirection.Descending) => query.OrderByDescending(order => order.DeliveryAt).ThenByDescending(order => order.OrderCode),
-            (OrderSortBy.CreatedAt, SortDirection.Ascending) => query.OrderBy(order => order.CreatedAt).ThenBy(order => order.OrderCode),
-            (OrderSortBy.CreatedAt, SortDirection.Descending) => query.OrderByDescending(order => order.CreatedAt).ThenByDescending(order => order.OrderCode),
-            (OrderSortBy.TotalAmount, SortDirection.Ascending) => query.OrderBy(order => order.TotalAmount).ThenBy(order => order.OrderCode),
-            (OrderSortBy.TotalAmount, SortDirection.Descending) => query.OrderByDescending(order => order.TotalAmount).ThenByDescending(order => order.OrderCode),
-            _ => query.OrderBy(order => order.DeliveryAt).ThenBy(order => order.OrderCode)
+            (OrderSortBy.DeliveryAt, SortDirection.Ascending) => prioritizedQuery.ThenBy(order => order.DeliveryAt).ThenBy(order => order.OrderCode),
+            (OrderSortBy.DeliveryAt, SortDirection.Descending) => prioritizedQuery.ThenByDescending(order => order.DeliveryAt).ThenByDescending(order => order.OrderCode),
+            (OrderSortBy.CreatedAt, SortDirection.Ascending) => prioritizedQuery.ThenBy(order => order.CreatedAt).ThenBy(order => order.OrderCode),
+            (OrderSortBy.CreatedAt, SortDirection.Descending) => prioritizedQuery.ThenByDescending(order => order.CreatedAt).ThenByDescending(order => order.OrderCode),
+            (OrderSortBy.TotalAmount, SortDirection.Ascending) => prioritizedQuery.ThenBy(order => order.TotalAmount).ThenBy(order => order.OrderCode),
+            (OrderSortBy.TotalAmount, SortDirection.Descending) => prioritizedQuery.ThenByDescending(order => order.TotalAmount).ThenByDescending(order => order.OrderCode),
+            _ => prioritizedQuery.ThenBy(order => order.DeliveryAt).ThenBy(order => order.OrderCode)
         };
         var orders = await orderedQuery
             .Skip((request.Page - 1) * request.PageSize)
@@ -116,7 +121,10 @@ public sealed class OrderService : IOrderService
     public async Task<OrderDetailDto> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var order = await GetAggregateAsync(id, false, cancellationToken);
-        return ToDetailDto(order);
+        var detail = ToDetailDto(order);
+        return _inventoryService is null
+            ? detail
+            : detail with { Materials = await _inventoryService.GetOrderMaterialsAsync(id, cancellationToken) };
     }
 
     public async Task<OrderDetailDto> CreateAsync(CreateOrderForm form, CancellationToken cancellationToken)
@@ -234,12 +242,16 @@ public sealed class OrderService : IOrderService
         if (form.Id != Guid.Empty && form.Id != id)
             throw Validation(nameof(form.Id), "Route id and body id must match.");
         await EnsureActiveChannelAsync(form.ChannelId, cancellationToken);
-        var snapshots = await ResolveSnapshotsAsync(form.Items, cancellationToken);
-        var order = await GetAggregateAsync(id, true, cancellationToken);
-        ApplyExpectedRowVersion(order, form.RowVersion);
-        var trackedChildren = CaptureTrackedChildren(order);
         var actor = CurrentActor();
         var now = UtcNow();
+        var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, form.RowVersion);
+        var snapshots = await ResolveSnapshotsAsync(
+            form.Items,
+            now,
+            cancellationToken,
+            order.Items.ToDictionary(item => item.Id));
+        var trackedChildren = CaptureTrackedChildren(order);
         var customer = await FindOrCreateCustomerAsync(form.OrdererName, form.OrdererPhone ?? string.Empty, now, cancellationToken);
         var address = await ResolveAddressSnapshotAsync(
             form.PickupAtShop,
@@ -271,7 +283,8 @@ public sealed class OrderService : IOrderService
             itemUpdates,
             now,
             actor.Id,
-            actor.Name);
+            actor.Name,
+            form.IsPaid);
 
         var currentItems = order.Items.ToList();
 
@@ -289,7 +302,6 @@ public sealed class OrderService : IOrderService
                 uploadedUrls.Add(url);
                 order.AddImage(currentItems[image.OrderItemIndex].Id, url, image.SortOrder);
             }
-            EnsureManualItemsHaveImages(order);
             TrackAddedChildren(order, trackedChildren);
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
@@ -315,6 +327,11 @@ public sealed class OrderService : IOrderService
         var actor = CurrentActor();
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        if (order.OrderStatus == status)
+        {
+            await transaction.CommitAsync(cancellationToken);
+            return;
+        }
         var trackedChildren = CaptureTrackedChildren(order);
         var reserve = order.RequiresInventoryReservation(status);
         var restore = order.RequiresInventoryRestore(status);
@@ -354,7 +371,9 @@ public sealed class OrderService : IOrderService
                 : false;
         }
 
-        order.ChangeStatus(status, inventoryReservedAfterTransition, UtcNow(), actor.Id, actor.Name);
+        var now = UtcNow();
+        await ApplyMaterialLifecycleAsync(order, status, actor.Id, now, cancellationToken);
+        order.ChangeStatus(status, inventoryReservedAfterTransition, now, actor.Id, actor.Name);
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -409,6 +428,13 @@ public sealed class OrderService : IOrderService
             foreach (var (productId, quantity) in quantities)
                 products[productId].RestoreStock(quantity);
         }
+
+        var now = UtcNow();
+        await ApplyMaterialLifecycleAsync(order, OrderStatus.Cancelled, CurrentActor().Id, now, cancellationToken);
+        var orderMaterials = await _dbContext.OrderMaterials
+            .Where(item => item.OrderId == order.Id)
+            .ToListAsync(cancellationToken);
+        _dbContext.OrderMaterials.RemoveRange(orderMaterials);
 
         _dbContext.Orders.Remove(order);
         try
@@ -484,7 +510,7 @@ public sealed class OrderService : IOrderService
             ? Channel.AdminId
             : form.ChannelId.Value;
         await EnsureActiveChannelAsync(channelId, cancellationToken);
-        var snapshots = await ResolveSnapshotsAsync(form.Items, cancellationToken);
+        var snapshots = await ResolveSnapshotsAsync(form.Items, now, cancellationToken);
         var customer = await FindOrCreateCustomerAsync(
             form.OrdererName,
             form.OrdererPhone ?? string.Empty,
@@ -508,7 +534,8 @@ public sealed class OrderService : IOrderService
             snapshots,
             now,
             actor.Id,
-            actor.Name);
+            actor.Name,
+            form.IsPaid);
 
         await ValidateImagesAsync(form.Images, order.Items.Count, cancellationToken);
         foreach (var image in form.Images.Where(item => item.ImageFile is { Length: > 0 }))
@@ -522,7 +549,6 @@ public sealed class OrderService : IOrderService
             var orderItem = order.Items.ElementAt(image.OrderItemIndex);
             order.AddImage(orderItem.Id, url, image.SortOrder);
         }
-        EnsureManualItemsHaveImages(order);
         return order;
     }
 
@@ -530,6 +556,7 @@ public sealed class OrderService : IOrderService
     {
         IQueryable<Order> query = _dbContext.Orders
             .Include(order => order.Items)
+                .ThenInclude(item => item.IngredientSnapshots)
             .Include(order => order.Images)
             .Include(order => order.ChangeLogs)
             .AsSplitQuery();
@@ -579,12 +606,15 @@ public sealed class OrderService : IOrderService
 
     private async Task<IReadOnlyList<OrderItemSnapshot>> ResolveSnapshotsAsync(
         IReadOnlyCollection<OrderLineRequest> lines,
-        CancellationToken cancellationToken)
+        DateTime capturedAtUtc,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<Guid, OrderItem>? existingItems = null)
     {
         if (lines.Count == 0)
             throw Validation(nameof(lines), "At least one order item is required.");
 
         var ids = new HashSet<int>();
+        var productTypeIds = new HashSet<int>();
         var skus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in lines)
         {
@@ -598,12 +628,54 @@ public sealed class OrderService : IOrderService
             }
             if (!string.IsNullOrWhiteSpace(line.ProductSku))
                 skus.Add(line.ProductSku.Trim());
+            if (line.ProductTypeId is <= 0)
+                throw Validation(nameof(line.ProductTypeId), "Product type id must be a positive integer.");
+            if (line.ProductTypeId.HasValue)
+                productTypeIds.Add(line.ProductTypeId.Value);
+            if (line.Ingredients is { Count: > 100 })
+                throw Validation(nameof(line.Ingredients), "An order item cannot contain more than 100 ingredients.");
+            if (line.Ingredients is not null)
+            {
+                if (line.Ingredients.Any(item => item.IngredientId <= 0
+                    || item.BaseQuantity <= 0
+                    || item.SortOrder < 0))
+                    throw Validation(nameof(line.Ingredients), "Every ingredient requires a valid id, positive quantity, and non-negative sort order.");
+                if (line.Ingredients.Select(item => item.IngredientId).Distinct().Count() != line.Ingredients.Count)
+                    throw Validation(nameof(line.Ingredients), "Ingredient ids must be unique within an order item.");
+            }
         }
 
         var products = await _dbContext.Products.AsNoTracking()
             .Include(product => product.Translations)
+            .Include(product => product.Ingredients)
             .Where(product => ids.Contains(product.Id) || skus.Contains(product.Sku))
+            .AsSplitQuery()
             .ToListAsync(cancellationToken);
+        foreach (var productTypeId in products.Select(product => product.ProductTypeId).OfType<int>())
+            productTypeIds.Add(productTypeId);
+        var productTypes = await _dbContext.ProductTypes.AsNoTracking()
+            .Include(productType => productType.Translations)
+            .Where(productType => productTypeIds.Contains(productType.Id))
+            .ToDictionaryAsync(productType => productType.Id, cancellationToken);
+        var ingredientIds = products
+            .SelectMany(product => product.Ingredients)
+            .Select(recipe => recipe.IngredientId)
+            .Concat(lines.SelectMany(line => line.Ingredients ?? [] ).Select(item => item.IngredientId))
+            .Distinct()
+            .ToArray();
+        var ingredientSnapshots = await (
+                from ingredient in _dbContext.Ingredients.AsNoTracking()
+                join unit in _dbContext.MeasurementUnits.AsNoTracking()
+                    on ingredient.BaseUnitId equals unit.Id
+                where ingredientIds.Contains(ingredient.Id)
+                select new IngredientCatalogSnapshot(
+                    ingredient.Id,
+                    ingredient.Code,
+                    ingredient.Name,
+                    unit.Code,
+                    unit.Name,
+                    unit.Symbol))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
         var byId = products.ToDictionary(product => product.Id);
         var bySku = products.GroupBy(product => product.Sku, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -625,6 +697,37 @@ public sealed class OrderService : IOrderService
                 bySku.TryGetValue(line.ProductSku.Trim(), out product);
             }
 
+            OrderItem? existingItem = null;
+            if (!string.IsNullOrWhiteSpace(line.Id))
+            {
+                if (!Guid.TryParse(line.Id, out var existingItemId))
+                    throw Validation(nameof(line.Id), "Order item id must be a valid GUID.");
+                if (existingItems is null || !existingItems.TryGetValue(existingItemId, out existingItem))
+                    throw Validation(nameof(line.Id), "Order item id does not belong to this order.");
+            }
+
+            var resolvedProductTypeId = product?.ProductTypeId ?? line.ProductTypeId;
+            ProductType? resolvedProductType = null;
+            if (resolvedProductTypeId.HasValue)
+            {
+                if (!productTypes.TryGetValue(resolvedProductTypeId.Value, out resolvedProductType))
+                    throw new NotFoundException(nameof(ProductType), resolvedProductTypeId.Value);
+                if (product is null && !resolvedProductType.IsActive)
+                    throw new ConflictException($"Dòng sản phẩm '{resolvedProductType.Code}' đã ngừng hoạt động.");
+            }
+            var resolvedProductTypeName = resolvedProductType?.Translations
+                .OrderByDescending(translation => translation.LanguageCode.Equals("vi", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(translation => translation.LanguageCode)
+                .Select(translation => translation.Name)
+                .FirstOrDefault() ?? resolvedProductType?.Code;
+
+            var productIdentityUnchanged = existingItem is not null
+                && existingItem.ProductId == product?.Id;
+            var ingredientsSpecified = line.IngredientsSpecified || line.Ingredients is not null;
+            var requestedRecipe = !ingredientsSpecified
+                ? null
+                : ResolveRequestedIngredientRecipe(line.Ingredients ?? [], ingredientSnapshots);
+
             if (product is not null)
             {
                 if (!product.IsActive)
@@ -634,6 +737,10 @@ public sealed class OrderService : IOrderService
                     .ThenBy(translation => translation.LanguageCode)
                     .Select(translation => translation.Name)
                     .FirstOrDefault() ?? line.ProductName;
+                var recipe = requestedRecipe
+                    ?? (productIdentityUnchanged
+                        ? null
+                        : ResolveProductIngredientRecipe(product, ingredientSnapshots));
                 snapshots.Add(new OrderItemSnapshot(
                     product.Id,
                     product.Sku,
@@ -646,12 +753,18 @@ public sealed class OrderService : IOrderService
                     line.HasCard,
                     line.CardMessage,
                     line.HasBanner,
-                    line.BannerMessage));
+                    line.BannerMessage,
+                    recipe,
+                    recipe is null ? null : capturedAtUtc,
+                    resolvedProductTypeId,
+                    resolvedProductTypeName));
             }
             else
             {
                 if (line.UnitPrice <= 0)
                     throw Validation("items", "Đơn giá sản phẩm ngoài danh mục phải lớn hơn 0.");
+                var recipe = requestedRecipe
+                    ?? (productIdentityUnchanged ? null : []);
                 snapshots.Add(new OrderItemSnapshot(
                     null,
                     line.ProductSku,
@@ -664,12 +777,73 @@ public sealed class OrderService : IOrderService
                     line.HasCard,
                     line.CardMessage,
                     line.HasBanner,
-                    line.BannerMessage));
+                    line.BannerMessage,
+                    recipe,
+                    recipe is null ? null : capturedAtUtc,
+                    resolvedProductTypeId,
+                    resolvedProductTypeName));
             }
         }
 
         return snapshots;
     }
+
+    private static IReadOnlyList<IngredientRecipeSnapshot> ResolveProductIngredientRecipe(
+        Product product,
+        IReadOnlyDictionary<int, IngredientCatalogSnapshot> ingredientSnapshots) =>
+        product.Ingredients
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.Id)
+            .Select(item =>
+            {
+                if (!ingredientSnapshots.TryGetValue(item.IngredientId, out var ingredient))
+                {
+                    throw new ConflictException(
+                        $"Product '{product.Sku}' has an ingredient recipe with missing master data.");
+                }
+                return new IngredientRecipeSnapshot(
+                    ingredient.Id,
+                    ingredient.Code,
+                    ingredient.Name,
+                    ingredient.UnitCode,
+                    ingredient.UnitName,
+                    ingredient.UnitSymbol,
+                    item.BaseQuantity,
+                    item.Note,
+                    item.SortOrder);
+            })
+            .ToArray();
+
+    private static IReadOnlyList<IngredientRecipeSnapshot> ResolveRequestedIngredientRecipe(
+        IReadOnlyCollection<OrderLineIngredientRequest> requested,
+        IReadOnlyDictionary<int, IngredientCatalogSnapshot> ingredientSnapshots) =>
+        requested
+            .OrderBy(item => item.SortOrder)
+            .ThenBy(item => item.IngredientId)
+            .Select(item =>
+            {
+                if (!ingredientSnapshots.TryGetValue(item.IngredientId, out var ingredient))
+                    throw new NotFoundException(nameof(Ingredient), item.IngredientId);
+                return new IngredientRecipeSnapshot(
+                    ingredient.Id,
+                    ingredient.Code,
+                    ingredient.Name,
+                    ingredient.UnitCode,
+                    ingredient.UnitName,
+                    ingredient.UnitSymbol,
+                    item.BaseQuantity,
+                    item.Note,
+                    item.SortOrder);
+            })
+            .ToArray();
+
+    private sealed record IngredientCatalogSnapshot(
+        int Id,
+        string Code,
+        string Name,
+        string UnitCode,
+        string UnitName,
+        string? UnitSymbol);
 
     private async Task<string> CreateUniqueOrderCodeAsync(DateTime now, CancellationToken cancellationToken)
     {
@@ -924,8 +1098,29 @@ public sealed class OrderService : IOrderService
             item.CardMessage,
             item.HasBanner,
             item.BannerMessage,
+            UtcOffset(item.IngredientSnapshotCapturedAtUtc),
+            item.IngredientSnapshots
+                .OrderBy(snapshot => snapshot.SortOrder)
+                .ThenBy(snapshot => snapshot.Id)
+                .Select(snapshot => new OrderItemIngredientSnapshotDto(
+                    snapshot.Id,
+                    snapshot.IngredientId,
+                    snapshot.IngredientCode,
+                    snapshot.IngredientName,
+                    snapshot.BaseUnitCode,
+                    snapshot.BaseUnitName,
+                    snapshot.BaseUnitSymbol,
+                    snapshot.PerProductBaseQuantity,
+                    snapshot.ProductQuantity,
+                    snapshot.TotalBaseQuantity,
+                    snapshot.Note,
+                    snapshot.SortOrder,
+                    UtcOffset(snapshot.CapturedAtUtc)))
+                .ToList(),
             order.Images.Where(image => image.OrderItemId == item.Id).OrderBy(image => image.SortOrder)
-                .Select(image => new OrderImageDto(image.Id, image.OrderItemId, image.ImageUrl, image.SortOrder, image.Description)).ToList())).ToList(),
+                .Select(image => new OrderImageDto(image.Id, image.OrderItemId, image.ImageUrl, image.SortOrder, image.Description)).ToList(),
+            item.ProductTypeId,
+            item.ProductTypeName)).ToList(),
         order.Images.OrderBy(image => image.SortOrder).Select(image => new OrderImageDto(
             image.Id,
             image.OrderItemId,
@@ -1032,20 +1227,11 @@ public sealed class OrderService : IOrderService
         }
     }
 
-    private static void EnsureManualItemsHaveImages(Order order)
-    {
-        var illustratedItemIds = order.Images
-            .Where(image => image.OrderItemId.HasValue)
-            .Select(image => image.OrderItemId!.Value)
-            .ToHashSet();
-        if (order.Items.Any(item => !item.ProductId.HasValue && !illustratedItemIds.Contains(item.Id)))
-            throw Validation("items", "Every item outside the product catalog must have at least one illustration image.");
-    }
-
     private static TrackedOrderChildren CaptureTrackedChildren(Order order) => new(
         order.Items.Select(item => item.Id).ToHashSet(),
         order.Images.Select(image => image.Id).ToHashSet(),
-        order.ChangeLogs.Select(log => log.Id).ToHashSet());
+        order.ChangeLogs.Select(log => log.Id).ToHashSet(),
+        order.Items.SelectMany(item => item.IngredientSnapshots).Select(item => item.Id).ToHashSet());
 
     private void ApplyExpectedRowVersion(Order order, string? encodedRowVersion)
     {
@@ -1073,6 +1259,9 @@ public sealed class OrderService : IOrderService
         _dbContext.OrderItems.AddRange(order.Items.Where(item => !tracked.ItemIds.Contains(item.Id)));
         _dbContext.OrderImages.AddRange(order.Images.Where(image => !tracked.ImageIds.Contains(image.Id)));
         _dbContext.OrderChangeLogs.AddRange(order.ChangeLogs.Where(log => !tracked.ChangeLogIds.Contains(log.Id)));
+        _dbContext.OrderItemIngredientSnapshots.AddRange(
+            order.Items.SelectMany(item => item.IngredientSnapshots)
+                .Where(item => !tracked.IngredientSnapshotIds.Contains(item.Id)));
     }
 
     private async Task DeleteFilesBestEffortAsync(IEnumerable<string> urls)
@@ -1087,6 +1276,68 @@ public sealed class OrderService : IOrderService
             {
                 // Storage cleanup must not hide the order result or the original application error.
             }
+        }
+    }
+
+    private async Task ApplyMaterialLifecycleAsync(
+        Order order,
+        OrderStatus targetStatus,
+        Guid? actorId,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        var targetIsCommit = order.OrderStatus == OrderStatus.Created && targetStatus == OrderStatus.Producing;
+        var targetIsRestore = targetStatus == OrderStatus.Cancelled;
+        if (!targetIsCommit && !targetIsRestore)
+            return;
+
+        var materials = await _dbContext.OrderMaterials
+            .Where(item => item.OrderId == order.Id)
+            .ToListAsync(cancellationToken);
+        if (materials.Count == 0)
+            return;
+        var stockUnitIds = materials.Select(item => item.StockUnitId).Distinct().ToArray();
+        var stockUnits = await _dbContext.InventoryStockUnits
+            .Where(item => stockUnitIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (stockUnits.Count != stockUnitIds.Length)
+            throw new ConflictException("Một hoặc nhiều size nguyên liệu của đơn hàng không còn tồn tại.");
+
+        foreach (var material in materials)
+        {
+            var stockUnit = stockUnits[material.StockUnitId];
+            var targetQuantity = targetIsCommit ? material.RequiredQuantity : 0;
+            var delta = decimal.Round(targetQuantity - material.DeductedQuantity, 6, MidpointRounding.AwayFromZero);
+            if (delta == 0)
+                continue;
+            if (delta > 0)
+            {
+                if (stockUnit.Quantity < delta)
+                {
+                    var size = string.IsNullOrWhiteSpace(material.SizeName) ? "không size" : $"size {material.SizeName}";
+                    throw new ConflictException(
+                        $"Vật tư kho '{material.InventoryItemName}' ({size}) không đủ tồn kho: cần {delta}, hiện còn {stockUnit.Quantity}.");
+                }
+                stockUnit.Remove(delta, now);
+            }
+            else
+            {
+                stockUnit.Add(-delta, now);
+            }
+
+            material.SetDeductedQuantity(targetQuantity, now);
+            _dbContext.StockTransactions.Add(new StockTransaction(
+                stockUnit.Id,
+                delta > 0 ? StockTransactionType.OrderUsage : StockTransactionType.OrderReturn,
+                -delta,
+                stockUnit.Quantity,
+                $"order:{order.Id:N}:material:{material.Id:N}:{Guid.NewGuid():N}",
+                null,
+                order.Id,
+                material.Id,
+                delta > 0 ? "Bắt đầu chuẩn bị đơn hàng." : "Hoàn kho do hủy hoặc xóa đơn hàng.",
+                actorId,
+                now));
         }
     }
 
@@ -1108,7 +1359,8 @@ public sealed class OrderService : IOrderService
     private sealed record TrackedOrderChildren(
         HashSet<Guid> ItemIds,
         HashSet<Guid> ImageIds,
-        HashSet<Guid> ChangeLogIds);
+        HashSet<Guid> ChangeLogIds,
+        HashSet<Guid> IngredientSnapshotIds);
 
     private sealed record OrderAddressSnapshot(
         AdministrativeScheme? Scheme,
