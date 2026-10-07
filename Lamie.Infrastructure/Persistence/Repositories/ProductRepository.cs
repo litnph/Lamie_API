@@ -35,6 +35,7 @@ namespace Lamie.Infrastructure.Persistence.Repositories
                 .Include(p => p.Styles)
                 .Include(p => p.Occasions)
                 .Include(p => p.Ingredients)
+                .Include(p => p.InventoryMaterials)
                 .Include(p => p.SimilarProducts)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == id);
@@ -51,6 +52,7 @@ namespace Lamie.Infrastructure.Persistence.Repositories
                 .Include(p => p.Styles)
                 .Include(p => p.Occasions)
                 .Include(p => p.Ingredients)
+                .Include(p => p.InventoryMaterials)
                 .Include(p => p.SimilarProducts)
                 .AsSplitQuery()
                 .ToListAsync();
@@ -72,6 +74,7 @@ namespace Lamie.Infrastructure.Persistence.Repositories
             _context.ProductStyles.RemoveRange(product.Styles);
             _context.ProductOccasions.RemoveRange(product.Occasions);
             _context.ProductIngredients.RemoveRange(product.Ingredients);
+            _context.ProductInventoryMaterials.RemoveRange(product.InventoryMaterials);
             _context.ProductSimilarProducts.RemoveRange(product.SimilarProducts);
             var inboundSimilarLinks = await _context.ProductSimilarProducts
                 .Where(item => item.SimilarProductId == product.Id)

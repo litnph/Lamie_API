@@ -31,6 +31,7 @@ namespace Lamie.Application.Settings.Products.Commands
         public List<CreateProductTranslationDto> Translations { get; set; } = new();
         public List<CreateProductImageDto> Images { get; set; } = new();
         public List<ProductIngredientInputDto> Ingredients { get; set; } = new();
+        public List<ProductInventoryMaterialInputDto> InventoryMaterials { get; set; } = new();
 
         public void UseFullReplacementSemantics()
         {

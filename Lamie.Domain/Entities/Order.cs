@@ -45,7 +45,9 @@ public sealed record OrderDetails(
     string? CommuneCode = null,
     string? CommuneName = null,
     string? AddressDetail = null,
-    string? FullAddressSnapshot = null);
+    string? FullAddressSnapshot = null,
+    string SenderName = "",
+    string SenderPhone = "");
 
 public sealed class Order
 {
@@ -109,6 +111,8 @@ public sealed class Order
     public string OrdererPhone { get; private set; } = string.Empty;
     public string RecipientName { get; private set; } = string.Empty;
     public string RecipientPhone { get; private set; } = string.Empty;
+    public string SenderName { get; private set; } = string.Empty;
+    public string SenderPhone { get; private set; } = string.Empty;
     public bool PickupAtShop { get; private set; }
     public bool ProvinceShipping { get; private set; }
     public string? DeliveryAddress { get; private set; }
@@ -148,6 +152,14 @@ public sealed class Order
     public IReadOnlyCollection<OrderItem> Items => _items;
     public IReadOnlyCollection<OrderImage> Images => _images;
     public IReadOnlyCollection<OrderChangeLog> ChangeLogs => _changeLogs;
+
+    public OrderStatus? PreviousStatus => OrderStatus switch
+    {
+        OrderStatus.Producing => OrderStatus.Created,
+        OrderStatus.Shipping => OrderStatus.Producing,
+        OrderStatus.Completed => OrderStatus.Shipping,
+        _ => null
+    };
 
     public bool RequiresInventoryReservation(OrderStatus target) =>
         OrderStatus == OrderStatus.Created && target == OrderStatus.Producing && !InventoryReserved;
@@ -263,6 +275,62 @@ public sealed class Order
         AddChangeLog("Order", "PaymentStatus", EnumValue(previous), EnumValue(target), "PaymentChanged", actorId, actorName, nowUtc, note);
     }
 
+    public void ReturnToPreviousStatus(
+        bool inventoryReservedAfterTransition,
+        DateTime nowUtc,
+        Guid? actorId,
+        string? actorName,
+        string? note = null)
+    {
+        EnsureUtc(nowUtc, "Current time");
+        var target = PreviousStatus
+            ?? throw new DomainException($"Order status {OrderStatus} does not have a previous processing status.");
+        var previous = OrderStatus;
+
+        if (previous == OrderStatus.Producing)
+            InventoryReserved = inventoryReservedAfterTransition;
+        if (previous == OrderStatus.Completed)
+            CompletedAt = null;
+
+        OrderStatus = target;
+        UpdatedAt = nowUtc;
+        UpdatedById = actorId;
+        AddChangeLog("Order", "OrderStatus", EnumValue(previous), EnumValue(target), "StatusReverted", actorId, actorName, nowUtc, note);
+    }
+
+    public void UpdateShippingFeeActual(
+        decimal? shippingFeeActual,
+        DateTime nowUtc,
+        Guid? actorId,
+        string? actorName)
+    {
+        EnsureUtc(nowUtc, "Current time");
+        if (OrderStatus is OrderStatus.Completed or OrderStatus.Cancelled)
+            throw new DomainException("Phí giao hàng thực tế chỉ có thể điều chỉnh trước khi đơn hoàn tất.");
+        if (shippingFeeActual < 0)
+            throw new DomainException("Phí giao hàng thực tế không thể là số âm.");
+        if (PickupAtShop && shippingFeeActual.HasValue)
+            throw new DomainException("Đơn nhận tại cửa hàng không có phí giao hàng thực tế.");
+
+        decimal? normalized = shippingFeeActual.HasValue ? Money(shippingFeeActual.Value) : null;
+        if (ShippingFeeActual == normalized)
+            return;
+
+        var previous = ShippingFeeActual;
+        ShippingFeeActual = normalized;
+        UpdatedAt = nowUtc;
+        UpdatedById = actorId;
+        AddChangeLog(
+            "Order",
+            "ShippingFeeActual",
+            previous?.ToString(CultureInfo.InvariantCulture),
+            normalized?.ToString(CultureInfo.InvariantCulture),
+            "Updated",
+            actorId,
+            actorName,
+            nowUtc);
+    }
+
     public void TouchMaterialConfiguration(DateTime nowUtc, Guid? actorId)
     {
         EnsureUtc(nowUtc, "Current time");
@@ -274,10 +342,12 @@ public sealed class Order
 
     private void ApplyDetails(OrderDetails details)
     {
-        OrdererName = Required(details.OrdererName, 200, "Orderer name");
+        OrdererName = Optional(details.OrdererName, 200, "Orderer name") ?? string.Empty;
         OrdererPhone = Optional(details.OrdererPhone, 30, "Orderer phone") ?? string.Empty;
-        RecipientName = Required(details.RecipientName, 200, "Recipient name");
-        RecipientPhone = Required(details.RecipientPhone, 30, "Recipient phone");
+        RecipientName = Optional(details.RecipientName, 200, "Recipient name") ?? string.Empty;
+        RecipientPhone = Optional(details.RecipientPhone, 30, "Recipient phone") ?? string.Empty;
+        SenderName = Optional(details.SenderName, 200, "Sender name") ?? string.Empty;
+        SenderPhone = Optional(details.SenderPhone, 30, "Sender phone") ?? string.Empty;
         EnsureUtc(details.DeliveryAtUtc, "Delivery time");
         if (details.DeliveryAtUtc == default)
             throw new DomainException("Delivery time is required.");

@@ -132,16 +132,34 @@ public sealed class NavigationBackendTests
             await dbContext.Database.MigrateAsync();
             await dbContext.Database.MigrateAsync();
 
-            Assert.Equal(44, await dbContext.Navigation.CountAsync());
-            Assert.Equal(44, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
+            Assert.Equal(47, await dbContext.Navigation.CountAsync());
+            Assert.Equal(47, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
             Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "tasks.workspace")).ParentId is null);
             Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "catalog-settings.home")).ParentId is null);
+            var catalogSettings = await dbContext.Navigation.SingleAsync(item => item.Key == "catalog-settings.home");
+            var expenseCategories = await dbContext.Navigation.SingleAsync(item => item.Key == "expenses.categories");
+            Assert.Equal(catalogSettings.Id, expenseCategories.ParentId);
+            Assert.Equal(140, expenseCategories.SortOrder);
+            Assert.False(expenseCategories.IsVisible);
+            Assert.All(
+                await dbContext.Navigation
+                    .Where(item => item.Key == "products.price-settings"
+                        || item.Key == "products.branding-settings")
+                    .ToListAsync(),
+                item =>
+                {
+                    Assert.Equal(catalogSettings.Id, item.ParentId);
+                    Assert.False(item.IsVisible);
+                    Assert.Equal(PermissionNames.ProductsManage, item.PermissionCode);
+                });
             Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "ingredients.demand")).IsVisible);
             var operations = await dbContext.Navigation.SingleAsync(item => item.Key == "group.operations");
+            var goods = await dbContext.Navigation.SingleAsync(item => item.Key == "group.goods");
             var inventory = await dbContext.Navigation.SingleAsync(item => item.Key == "ingredients.inventory");
             var legacyInventoryGroup = await dbContext.Navigation.SingleAsync(item => item.Key == "inventory.group");
             Assert.Equal("Kho hàng", inventory.Label);
-            Assert.Equal(operations.Id, inventory.ParentId);
+            Assert.NotEqual(operations.Id, inventory.ParentId);
+            Assert.Equal(goods.Id, inventory.ParentId);
             Assert.True(inventory.IsVisible);
             Assert.False(legacyInventoryGroup.IsVisible);
             Assert.Null(legacyInventoryGroup.ParentId);
@@ -188,7 +206,7 @@ public sealed class NavigationBackendTests
         {
             await dbContext.Database.MigrateAsync();
             Assert.Equal(0, await CountForeignKeysAsync(dbContext));
-            Assert.Equal(44, await dbContext.Navigation.CountAsync());
+            Assert.Equal(47, await dbContext.Navigation.CountAsync());
             dbContext.Navigation.RemoveRange(dbContext.Navigation);
             await dbContext.SaveChangesAsync();
 

@@ -105,6 +105,39 @@ public sealed class ReferentialIntegrityService : IReferentialIntegrityService
             errors["ingredients"] =
                 [$"These ingredients require whole-number quantities: {string.Join(", ", invalidFractionalIds)}"];
 
+        var inventoryReferences = references.InventoryMaterials
+            ?? Array.Empty<ProductInventoryMaterialReference>();
+        var stockUnitIds = inventoryReferences.Select(item => item.StockUnitId).Distinct().ToArray();
+        var inventoryStates = await (
+                from stockUnit in _context.InventoryStockUnits.AsNoTracking()
+                join inventoryItem in _context.InventoryItems.AsNoTracking()
+                    on stockUnit.InventoryItemId equals inventoryItem.Id
+                where stockUnitIds.Contains(stockUnit.Id)
+                select new
+                {
+                    stockUnit.Id,
+                    StockUnitIsActive = stockUnit.IsActive,
+                    InventoryItemIsActive = inventoryItem.IsActive
+                })
+            .ToListAsync(cancellationToken);
+        var existingInventoryMaterials = (references.ExistingInventoryMaterials
+                ?? Array.Empty<ProductInventoryMaterialReference>())
+            .ToDictionary(item => item.StockUnitId, item => item.Quantity);
+        var inventoryStateById = inventoryStates.ToDictionary(item => item.Id);
+        var invalidStockUnitIds = inventoryReferences
+            .Where(reference => reference.StockUnitId == Guid.Empty
+                || !inventoryStateById.TryGetValue(reference.StockUnitId, out var state)
+                || (!(state.StockUnitIsActive && state.InventoryItemIsActive)
+                    && (!existingInventoryMaterials.TryGetValue(reference.StockUnitId, out var existingQuantity)
+                        || existingQuantity != reference.Quantity)))
+            .Select(reference => reference.StockUnitId)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToArray();
+        if (invalidStockUnitIds.Length > 0)
+            errors["inventoryMaterials"] =
+                [$"Unknown, inactive, or modified inactive stock unit ids: {string.Join(", ", invalidStockUnitIds)}"];
+
         var requestedLanguages = references.LanguageCodes
             .Where(code => !string.IsNullOrWhiteSpace(code))
             .Select(code => code.Trim())

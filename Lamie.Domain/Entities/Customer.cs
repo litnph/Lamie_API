@@ -34,12 +34,12 @@ public sealed class Customer
         bool isActive,
         DateTime nowUtc)
     {
-        if (string.IsNullOrWhiteSpace(name))
-            throw new DomainException("Customer name is required.");
+        if (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(phone))
+            throw new DomainException("Customer name or phone is required.");
         if (name.Trim().Length > 200)
             throw new DomainException("Customer name cannot exceed 200 characters.");
 
-        var normalizedPhone = NormalizePhone(phone);
+        var normalizedPhone = string.IsNullOrWhiteSpace(phone) ? string.Empty : NormalizePhone(phone);
         var normalizedEmail = string.IsNullOrWhiteSpace(email) ? null : User.Normalize(email);
         if (normalizedEmail?.Length > 320)
             throw new DomainException("Customer email cannot exceed 320 characters.");

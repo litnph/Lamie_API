@@ -1924,6 +1924,18 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("rowversion")
                         .HasColumnName("row_version");
 
+                    b.Property<string>("SenderName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("sender_name");
+
+                    b.Property<string>("SenderPhone")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)")
+                        .HasColumnName("sender_phone");
+
                     b.Property<decimal>("ShippingFee")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)")
@@ -2116,6 +2128,15 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)")
                         .HasColumnName("card_message");
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int")
+                        .HasColumnName("category_id");
+
+                    b.Property<string>("CategoryName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("category_name");
 
                     b.Property<decimal>("DiscountAmount")
                         .HasPrecision(18, 2)
@@ -2815,6 +2836,19 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                             Name = "Xem Cài đặt danh mục",
                             SortOrder = 300,
                             UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000031"),
+                            Code = "orders.reverse-status",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Đưa đơn hàng về bước xử lý liền trước.",
+                            Group = "Đơn hàng",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Trả lại trạng thái đơn hàng",
+                            SortOrder = 310,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
                 });
 
@@ -2948,9 +2982,31 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(5,2)")
                         .HasColumnName("price_deviation_percent");
 
+                    b.Property<string>("ShopLogoUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("shop_logo_url");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("updated_at");
+
+                    b.Property<bool>("WatermarkEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true)
+                        .HasColumnName("watermark_enabled");
+
+                    b.Property<string>("WatermarkImageUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("watermark_image_url");
+
+                    b.Property<int>("WatermarkSource")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("watermark_source");
 
                     b.HasKey("Id")
                         .HasName("pk_cat_product_settings");
@@ -2962,7 +3018,9 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         {
                             Id = 1,
                             PriceDeviationPercent = 20m,
-                            UpdatedAt = new DateTime(2026, 9, 4, 0, 0, 0, 0, DateTimeKind.Utc)
+                            UpdatedAt = new DateTime(2026, 9, 4, 0, 0, 0, 0, DateTimeKind.Utc),
+                            WatermarkEnabled = true,
+                            WatermarkSource = 1
                         });
                 });
 
@@ -3185,6 +3243,45 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_rel_product_ingredients_product_id_ingredient_id");
 
                     b.ToTable("rel_product_ingredients", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductInventoryMaterial", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasColumnName("id");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ProductId")
+                        .HasColumnType("int")
+                        .HasColumnName("product_id");
+
+                    b.Property<decimal>("Quantity")
+                        .HasPrecision(18, 6)
+                        .HasColumnType("decimal(18,6)")
+                        .HasColumnName("quantity");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int")
+                        .HasColumnName("sort_order");
+
+                    b.Property<Guid>("StockUnitId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("stock_unit_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_rel_product_inventory_materials");
+
+                    b.HasIndex("StockUnitId")
+                        .HasDatabaseName("ix_rel_product_inventory_materials_stock_unit_id");
+
+                    b.HasIndex("ProductId", "StockUnitId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_rel_product_inventory_materials_product_id_stock_unit_id");
+
+                    b.ToTable("rel_product_inventory_materials", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.ProductOccasion", b =>
@@ -3942,6 +4039,12 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         {
                             RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
                             PermissionId = new Guid("10000000-0000-4000-8000-000000000030"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000031"),
                             GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
                         },
                         new
@@ -4973,6 +5076,16 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_rel_product_ingredients_cat_products_product_id");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ProductInventoryMaterial", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Product", null)
+                        .WithMany("InventoryMaterials")
+                        .HasForeignKey("ProductId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_rel_product_inventory_materials_cat_products_product_id");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.ProductOccasion", b =>
                 {
                     b.HasOne("Lamie.Domain.Entities.Occasion", null)
@@ -5176,6 +5289,8 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Navigation("Images");
 
                     b.Navigation("Ingredients");
+
+                    b.Navigation("InventoryMaterials");
 
                     b.Navigation("Occasions");
 

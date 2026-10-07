@@ -44,6 +44,7 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<ProductStyle> ProductStyles => Set<ProductStyle>();
         public DbSet<ProductOccasion> ProductOccasions => Set<ProductOccasion>();
         public DbSet<ProductIngredient> ProductIngredients => Set<ProductIngredient>();
+        public DbSet<ProductInventoryMaterial> ProductInventoryMaterials => Set<ProductInventoryMaterial>();
         public DbSet<MeasurementUnit> MeasurementUnits => Set<MeasurementUnit>();
         public DbSet<Ingredient> Ingredients => Set<Ingredient>();
         public DbSet<IngredientConversion> IngredientConversions => Set<IngredientConversion>();
@@ -329,6 +330,8 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.OrdererPhone).HasMaxLength(30);
                 entity.Property(x => x.RecipientName).HasMaxLength(200);
                 entity.Property(x => x.RecipientPhone).HasMaxLength(30);
+                entity.Property(x => x.SenderName).HasMaxLength(200);
+                entity.Property(x => x.SenderPhone).HasMaxLength(30);
                 entity.Property(x => x.ProvinceShipping);
                 entity.Property(x => x.DeliveryAddress).HasMaxLength(1500);
                 entity.Property(x => x.DeliveryAddressDescription).HasMaxLength(1000);
@@ -407,6 +410,7 @@ namespace Lamie.Infrastructure.Persistence
                 entity.HasKey(x => x.Id);
                 entity.Property(x => x.ProductSku).HasMaxLength(100);
                 entity.Property(x => x.ProductName).HasMaxLength(300);
+                entity.Property(x => x.CategoryName).HasMaxLength(200);
                 entity.Property(x => x.ProductTypeName).HasMaxLength(200);
                 entity.Property(x => x.ThumbnailUrl).HasMaxLength(2048);
                 entity.Property(x => x.UnitPrice).HasPrecision(18, 2);
@@ -581,6 +585,11 @@ namespace Lamie.Infrastructure.Persistence
                       .HasForeignKey(r => r.ProductId)
                       .OnDelete(DeleteBehavior.Cascade);
 
+                entity.HasMany(p => p.InventoryMaterials)
+                      .WithOne()
+                      .HasForeignKey(r => r.ProductId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
                 entity.HasMany(p => p.SimilarProducts)
                       .WithOne()
                       .HasForeignKey(r => r.ProductId)
@@ -594,11 +603,23 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.PriceDeviationPercent)
                     .HasColumnName("price_deviation_percent")
                     .HasPrecision(5, 2);
+                entity.Property(x => x.ShopLogoUrl).HasMaxLength(2048);
+                entity.Property(x => x.WatermarkEnabled)
+                    .HasDefaultValue(Lamie.Domain.Entities.ProductCatalogSettings.DefaultWatermarkEnabled);
+                entity.Property(x => x.WatermarkSource)
+                    .HasConversion<int>()
+                    .HasDefaultValue(Lamie.Domain.Entities.ProductCatalogSettings.DefaultWatermarkSource)
+                    .HasSentinel((Lamie.Domain.Entities.ProductWatermarkSource)0);
+                entity.Property(x => x.WatermarkImageUrl).HasMaxLength(2048);
                 entity.Property(x => x.UpdatedAt).HasColumnName("updated_at");
                 entity.HasData(new
                 {
-                Id = Lamie.Domain.Entities.ProductCatalogSettings.SingletonId,
-                PriceDeviationPercent = Lamie.Domain.Entities.ProductCatalogSettings.DefaultPriceDeviationPercent,
+                    Id = Lamie.Domain.Entities.ProductCatalogSettings.SingletonId,
+                    PriceDeviationPercent = Lamie.Domain.Entities.ProductCatalogSettings.DefaultPriceDeviationPercent,
+                    ShopLogoUrl = (string?)null,
+                    WatermarkEnabled = Lamie.Domain.Entities.ProductCatalogSettings.DefaultWatermarkEnabled,
+                    WatermarkSource = Lamie.Domain.Entities.ProductCatalogSettings.DefaultWatermarkSource,
+                    WatermarkImageUrl = (string?)null,
                     UpdatedAt = new DateTime(2026, 9, 4, 0, 0, 0, DateTimeKind.Utc)
                 });
             });
@@ -752,6 +773,15 @@ namespace Lamie.Infrastructure.Persistence
                     .WithMany()
                     .HasForeignKey(x => x.IngredientId)
                     .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<ProductInventoryMaterial>(entity =>
+            {
+                entity.ToTable("rel_product_inventory_materials");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Quantity).HasPrecision(18, 6);
+                entity.HasIndex(x => new { x.ProductId, x.StockUnitId }).IsUnique();
+                entity.HasIndex(x => x.StockUnitId);
             });
 
             modelBuilder.Entity<ProductTranslation>(entity =>

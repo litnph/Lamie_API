@@ -34,6 +34,21 @@ public sealed record ProductIngredientDto
     public int SortOrder { get; init; }
 }
 
+public sealed record ProductInventoryMaterialInputDto
+{
+    public Guid StockUnitId { get; init; }
+    public decimal Quantity { get; init; }
+    public int SortOrder { get; init; }
+}
+
+public sealed record ProductInventoryMaterialDto
+{
+    public int Id { get; init; }
+    public Guid StockUnitId { get; init; }
+    public decimal Quantity { get; init; }
+    public int SortOrder { get; init; }
+}
+
 public sealed record ProductDetailsDto
 {
     public int Id { get; init; }
@@ -58,5 +73,6 @@ public sealed record ProductDetailsDto
     public IReadOnlyList<int> OccasionIds { get; init; } = [];
     public IReadOnlyList<int> SimilarProductIds { get; init; } = [];
     public IReadOnlyList<ProductIngredientDto> Ingredients { get; init; } = [];
+    public IReadOnlyList<ProductInventoryMaterialDto> InventoryMaterials { get; init; } = [];
 }
 

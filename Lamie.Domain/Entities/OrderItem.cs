@@ -18,7 +18,9 @@ public sealed record OrderItemSnapshot(
     IReadOnlyList<IngredientRecipeSnapshot>? IngredientRecipe = null,
     DateTime? IngredientSnapshotCapturedAtUtc = null,
     int? ProductTypeId = null,
-    string? ProductTypeName = null);
+    string? ProductTypeName = null,
+    int? CategoryId = null,
+    string? CategoryName = null);
 
 public sealed record OrderItemUpdate(Guid? Id, OrderItemSnapshot Snapshot);
 
@@ -41,6 +43,8 @@ public sealed class OrderItem
     public Guid Id { get; private set; }
     public Guid OrderId { get; private set; }
     public int? ProductId { get; private set; }
+    public int? CategoryId { get; private set; }
+    public string? CategoryName { get; private set; }
     public int? ProductTypeId { get; private set; }
     public string? ProductTypeName { get; private set; }
     public string? ProductSku { get; private set; }
@@ -74,6 +78,8 @@ public sealed class OrderItem
     private void Apply(NormalizedSnapshot snapshot)
     {
         ProductId = snapshot.ProductId;
+        CategoryId = snapshot.CategoryId;
+        CategoryName = snapshot.CategoryName;
         ProductTypeId = snapshot.ProductTypeId;
         ProductTypeName = snapshot.ProductTypeName;
         ProductSku = snapshot.ProductSku;
@@ -138,6 +144,8 @@ public sealed class OrderItem
     {
         if (snapshot.ProductId is <= 0)
             throw new DomainException("Product id must be greater than zero when supplied.");
+        if (snapshot.CategoryId is <= 0)
+            throw new DomainException("Category id must be greater than zero when supplied.");
         if (snapshot.ProductTypeId is <= 0)
             throw new DomainException("Product type id must be greater than zero when supplied.");
         if (string.IsNullOrWhiteSpace(snapshot.ProductName))
@@ -203,7 +211,9 @@ public sealed class OrderItem
             ingredientRecipe,
             snapshot.IngredientSnapshotCapturedAtUtc,
             snapshot.ProductTypeId,
-            NormalizeOptional(snapshot.ProductTypeName, 200, "Product type name"));
+            NormalizeOptional(snapshot.ProductTypeName, 200, "Product type name"),
+            snapshot.CategoryId,
+            NormalizeOptional(snapshot.CategoryName, 200, "Category name"));
     }
 
     private static string? NormalizeOptional(string? value, int maxLength, string field)
@@ -231,5 +241,7 @@ public sealed class OrderItem
         IReadOnlyList<IngredientRecipeSnapshot>? IngredientRecipe,
         DateTime? IngredientSnapshotCapturedAtUtc,
         int? ProductTypeId,
-        string? ProductTypeName);
+        string? ProductTypeName,
+        int? CategoryId,
+        string? CategoryName);
 }

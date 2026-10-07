@@ -12,7 +12,9 @@ public interface IOrderService
     Task<BatchCreateOrdersDto> CreateBatchAsync(BatchCreateOrdersForm form, CancellationToken cancellationToken);
     Task<OrderDetailDto> UpdateAsync(Guid id, UpdateOrderForm form, CancellationToken cancellationToken);
     Task ChangeStatusAsync(Guid id, OrderStatus status, CancellationToken cancellationToken);
+    Task ReturnToPreviousStatusAsync(Guid id, CancellationToken cancellationToken);
     Task ChangePaymentStatusAsync(Guid id, PaymentStatus status, CancellationToken cancellationToken);
+    Task UpdateShippingFeeActualAsync(Guid id, decimal? shippingFeeActual, CancellationToken cancellationToken);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken);
     Task<IReadOnlyList<OrderCalendarItemDto>> CalendarAsync(DateOnly date, CancellationToken cancellationToken);
     Task<IReadOnlyList<OrderDeliveryLocationDto>> CalendarLocationsAsync(DateOnly date, CancellationToken cancellationToken);

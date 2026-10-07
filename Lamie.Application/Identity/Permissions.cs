@@ -9,6 +9,7 @@ public static class PermissionNames
     public const string OrdersView = "orders.view";
     public const string OrdersManage = "orders.manage";
     public const string OrdersCancel = "orders.cancel";
+    public const string OrdersReverseStatus = "orders.reverse-status";
     public const string CustomersView = "customers.view";
     public const string CustomersManage = "customers.manage";
     public const string ChannelsView = "channels.view";
@@ -66,7 +67,9 @@ public static class PermissionNames
         new(InventoryView, "Xem kho tồn", "Kho tồn", "Xem hàng tồn, số lượng, cảnh báo và lịch sử giao dịch."),
         new(InventoryManage, "Quản lý kho tồn", "Kho tồn", "Tạo vật tư kho, cấu hình size, nhập kho và điều chỉnh usage của đơn hàng."),
         new(TasksView, "Xem Việc cần làm", "Vận hành", "Mở không gian Việc cần làm; dữ liệu từng tab vẫn yêu cầu quyền nghiệp vụ tương ứng."),
-        new(CatalogSettingsView, "Xem Cài đặt danh mục", "Cấu hình", "Mở không gian Cài đặt danh mục; từng nhóm dữ liệu vẫn yêu cầu quyền riêng.")
+        new(CatalogSettingsView, "Xem Cài đặt danh mục", "Cấu hình", "Mở không gian Cài đặt danh mục; từng nhóm dữ liệu vẫn yêu cầu quyền riêng."),
+        // Keep new descriptors appended so deterministic permission ids remain stable.
+        new(OrdersReverseStatus, "Trả lại trạng thái đơn hàng", "Đơn hàng", "Đưa đơn hàng về bước xử lý liền trước.")
     ];
 
     public static readonly IReadOnlyCollection<string> All = Descriptors.Select(item => item.Code).ToArray();

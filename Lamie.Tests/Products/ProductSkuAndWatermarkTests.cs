@@ -1,6 +1,8 @@
 using Lamie.Application.Common.Uploads;
 using Lamie.Application.Settings.Products.Commands;
 using Lamie.Domain.Products;
+using Lamie.Domain.Entities;
+using Lamie.Domain.Exceptions;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.PixelFormats;
@@ -12,6 +14,47 @@ namespace Lamie.Tests.Products;
 
 public sealed class ProductSkuAndWatermarkTests
 {
+    [Fact]
+    public void Product_inventory_materials_reference_stock_units_and_preserve_order()
+    {
+        var product = new Product("A7K2", 100_000, 0, 1, 1, false);
+        var first = Guid.NewGuid();
+        var second = Guid.NewGuid();
+
+        product.ReplaceInventoryMaterials([
+            new ProductInventoryMaterialDefinition(first, 1.25m, 1),
+            new ProductInventoryMaterialDefinition(second, 2m, 0)
+        ]);
+
+        Assert.Equal([first, second], product.InventoryMaterials.Select(item => item.StockUnitId));
+        Assert.Equal([1.25m, 2m], product.InventoryMaterials.Select(item => item.Quantity));
+        Assert.Throws<DomainException>(() => product.ReplaceInventoryMaterials([
+            new ProductInventoryMaterialDefinition(first, 1m, 0),
+            new ProductInventoryMaterialDefinition(first, 2m, 1)
+        ]));
+    }
+
+    [Fact]
+    public void Disabling_watermark_preserves_selected_source_and_assets()
+    {
+        var now = new DateTime(2026, 9, 12, 10, 0, 0, DateTimeKind.Utc);
+        var settings = new ProductCatalogSettings(20, now);
+
+        settings.UpdateBranding(
+            20,
+            false,
+            ProductWatermarkSource.UploadedImage,
+            "/uploads/shop/logo.png",
+            "/uploads/shop/watermark.png",
+            now.AddMinutes(1));
+
+        Assert.False(settings.WatermarkEnabled);
+        Assert.Equal(ProductWatermarkSource.UploadedImage, settings.WatermarkSource);
+        Assert.Equal("/uploads/shop/logo.png", settings.ShopLogoUrl);
+        Assert.Equal("/uploads/shop/watermark.png", settings.WatermarkImageUrl);
+    }
+
+
     [Fact]
     public void Create_product_contract_allows_omitted_sku_for_server_generation()
     {
@@ -38,7 +81,10 @@ public sealed class ProductSkuAndWatermarkTests
     }
 
     [Theory]
-    [InlineData("A7K2", true)] [InlineData("9XAM", true)] [InlineData("OLD-1234", false)] [InlineData("a7k2", false)]
+    [InlineData("A7K2", true)]
+    [InlineData("9XAM", true)]
+    [InlineData("OLD-1234", false)]
+    [InlineData("a7k2", false)]
     public void New_sku_format_is_strict_while_legacy_values_can_remain_in_storage(string sku, bool expected) =>
         Assert.Equal(expected, ProductSku.IsValidNewSku(sku));
 
@@ -54,7 +100,17 @@ public sealed class ProductSkuAndWatermarkTests
         Assert.Equal(320, result.Width);
         Assert.Equal(240, result.Height);
         Assert.True(output.Length > 0);
-        Assert.NotEqual(new Rgba32(240, 240, 240), result[160, 230]);
+        var changedPixels = 0;
+        result.ProcessPixelRows(accessor =>
+        {
+            for (var y = accessor.Height / 2; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = accessor.Width / 2; x < row.Length; x++)
+                    if (row[x] != new Rgba32(240, 240, 240)) changedPixels++;
+            }
+        });
+        Assert.True(changedPixels > 0);
     }
 
     [Theory]
@@ -107,7 +163,7 @@ public sealed class ProductSkuAndWatermarkTests
     [InlineData(320, 240)]
     [InlineData(900, 1600)]
     [InlineData(1600, 900)]
-    public async Task Product_identification_stamp_is_centered_horizontally_at_the_bottom(
+    public async Task Product_identification_stamp_is_right_aligned_at_the_bottom(
         int width,
         int height)
     {
@@ -131,8 +187,49 @@ public sealed class ProductSkuAndWatermarkTests
         });
 
         Assert.NotEmpty(changedColumns);
-        var watermarkCenter = (changedColumns.Min() + changedColumns.Max()) / 2d;
-        Assert.InRange(watermarkCenter, width / 2d - 1, width / 2d + 1);
+        var leftMargin = changedColumns.Min();
+        var rightMargin = width - 1 - changedColumns.Max();
+        Assert.True(leftMargin > rightMargin * 2, $"Expected a right-aligned watermark, margins were {leftMargin}px and {rightMargin}px.");
+        Assert.True(changedColumns.Min() > width / 2);
+    }
+
+    [Theory]
+    [InlineData(160, 120, "RNPH")]
+    [InlineData(320, 240, "A7K2")]
+    [InlineData(800, 800, "OLD-1234")]
+    public async Task Product_identification_text_is_vertically_centered_inside_its_panel(
+        int width,
+        int height,
+        string sku)
+    {
+        var background = new Rgba32(24, 24, 24);
+        using var sourceImage = new Image<Rgba32>(width, height, background);
+        await using var source = new MemoryStream();
+        await sourceImage.SaveAsPngAsync(source);
+        source.Position = 0;
+
+        await using var output = await ProductImageWatermarker.ApplyAsync(source, sku, "image/png");
+        using var result = await Image.LoadAsync<Rgba32>(output);
+        var panelRows = new HashSet<int>();
+        var textRows = new HashSet<int>();
+        result.ProcessPixelRows(accessor =>
+        {
+            for (var y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (var x = accessor.Width / 2; x < row.Length; x++)
+                {
+                    if (row[x] != background) panelRows.Add(y);
+                    if (row[x].R > 200 && row[x].G > 200 && row[x].B > 200) textRows.Add(y);
+                }
+            }
+        });
+
+        Assert.NotEmpty(panelRows);
+        Assert.NotEmpty(textRows);
+        var topGap = textRows.Min() - panelRows.Min();
+        var bottomGap = panelRows.Max() - textRows.Max();
+        Assert.InRange(Math.Abs(topGap - bottomGap), 0, 2);
     }
 
     [Theory]

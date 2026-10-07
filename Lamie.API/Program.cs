@@ -215,6 +215,7 @@ builder.Services.AddScoped<IContentPublishingService, ContentPublishingService>(
 builder.Services.AddScoped<IFeDataExportService, FeDataExportService>();
 builder.Services.AddScoped<IProductCatalogFeatureService, ProductCatalogFeatureService>();
 builder.Services.AddSingleton<IProductVisualEmbeddingProvider, ProductVisualEmbeddingProvider>();
+builder.Services.AddScoped<IProductImageWatermarkService, ConfiguredProductImageWatermarkService>();
 builder.Services.AddScoped<IReferentialIntegrityService, ReferentialIntegrityService>();
 builder.Services.AddScoped<IIngredientCatalogService, IngredientCatalogService>();
 builder.Services.AddScoped<IIngredientDemandReportService, IngredientDemandReportService>();

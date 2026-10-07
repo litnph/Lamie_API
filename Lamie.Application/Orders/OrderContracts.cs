@@ -36,7 +36,9 @@ public sealed record OrderItemDto(
     IReadOnlyList<OrderItemIngredientSnapshotDto> IngredientSnapshots,
     IReadOnlyList<OrderImageDto> Images,
     int? ProductTypeId = null,
-    string? ProductTypeName = null);
+    string? ProductTypeName = null,
+    int? CategoryId = null,
+    string? CategoryName = null);
 
 public sealed record OrderImageDto(Guid Id, Guid? OrderItemId, string ImageUrl, int SortOrder, string? Description);
 
@@ -116,7 +118,12 @@ public sealed record OrderDetailDto(
     IReadOnlyList<OrderItemDto> Items,
     IReadOnlyList<OrderImageDto> Images,
     IReadOnlyList<OrderChangeLogDto> ChangeLogs,
-    IReadOnlyList<OrderMaterialDto>? Materials = null);
+    IReadOnlyList<OrderMaterialDto>? Materials = null)
+{
+    public Guid? CustomerId { get; init; }
+    public string SenderName { get; init; } = string.Empty;
+    public string SenderPhone { get; init; } = string.Empty;
+}
 
 public sealed record OrderCalendarItemDto(
     Guid Id,
@@ -194,6 +201,7 @@ public sealed class OrderLineRequest
 {
     public string? Id { get; init; }
     public string? ProductId { get; init; }
+    public int? CategoryId { get; init; }
     public int? ProductTypeId { get; init; }
     public string? ProductSku { get; init; }
     public string ProductName { get; init; } = string.Empty;
@@ -218,3 +226,4 @@ public sealed class OrderLineIngredientRequest
 
 public sealed record ChangeOrderStatusRequest(OrderStatus Status);
 public sealed record ChangePaymentStatusRequest(PaymentStatus Status);
+public sealed record UpdateShippingFeeActualRequest(decimal? ShippingFeeActual);

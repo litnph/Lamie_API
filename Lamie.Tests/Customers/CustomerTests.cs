@@ -62,6 +62,23 @@ public sealed class CustomerTests
     }
 
     [Fact]
+    public void MemberCanBeCreatedWithOnlyNameOrOnlyPhoneButNotWithNoIdentity()
+    {
+        var now = new DateTime(2026, 9, 10, 1, 0, 0, DateTimeKind.Utc);
+
+        var nameOnly = new Customer("Khách tại cửa hàng", string.Empty, null, null, now);
+        var phoneOnly = new Customer(string.Empty, "090 123 4567", null, null, now);
+
+        Assert.Equal("Khách tại cửa hàng", nameOnly.Name);
+        Assert.Empty(nameOnly.Phone);
+        Assert.Empty(nameOnly.NormalizedPhone);
+        Assert.Empty(phoneOnly.Name);
+        Assert.Equal("0901234567", phoneOnly.NormalizedPhone);
+        Assert.Throws<Lamie.Domain.Exceptions.DomainException>(() =>
+            new Customer(string.Empty, string.Empty, null, null, now));
+    }
+
+    [Fact]
     public void CustomerPagedResponseUsesFrontendJsonShape()
     {
         var latestOrder = new OrderListItemDto(

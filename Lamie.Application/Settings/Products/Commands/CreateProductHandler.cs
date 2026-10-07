@@ -16,19 +16,22 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
     private readonly IProductTypeRepository _productTypeRepository;
     private readonly IReferentialIntegrityService _referentialIntegrity;
     private readonly IProductVisualEmbeddingProvider _visualEmbeddingProvider;
+    private readonly IProductImageWatermarkService _watermarkService;
 
     public CreateProductHandler(
         IProductRepository repository,
         IFileStorage fileStorage,
         IProductTypeRepository productTypeRepository,
         IReferentialIntegrityService referentialIntegrity,
-        IProductVisualEmbeddingProvider? visualEmbeddingProvider = null)
+        IProductVisualEmbeddingProvider? visualEmbeddingProvider = null,
+        IProductImageWatermarkService? watermarkService = null)
     {
         _repository = repository;
         _fileStorage = fileStorage;
         _productTypeRepository = productTypeRepository;
         _referentialIntegrity = referentialIntegrity;
         _visualEmbeddingProvider = visualEmbeddingProvider ?? new ProductVisualEmbeddingProvider();
+        _watermarkService = watermarkService ?? new SkuProductImageWatermarkService();
     }
 
     public async Task<int> Handle(CreateProductCommand command, CancellationToken cancellationToken)
@@ -56,7 +59,9 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                 command.Translations.Select(item => item.LanguageCode).ToArray(),
                 command.Ingredients.Select(item => new ProductIngredientReference(
                     item.IngredientId,
-                    item.BaseQuantity)).ToArray()),
+                    item.BaseQuantity)).ToArray(),
+                InventoryMaterials: command.InventoryMaterials.Select(item =>
+                    new ProductInventoryMaterialReference(item.StockUnitId, item.Quantity)).ToArray()),
             cancellationToken);
 
         var product = new Product(
@@ -72,6 +77,8 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
             item.BaseQuantity,
             item.Note,
             item.SortOrder)));
+        product.ReplaceInventoryMaterials(command.InventoryMaterials.Select(item =>
+            new ProductInventoryMaterialDefinition(item.StockUnitId, item.Quantity, item.SortOrder)));
         if (command.SalePrice.HasValue)
             product.SetSalePrice(command.SalePrice.Value);
 
@@ -110,7 +117,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                         cancellationToken);
                 }
                 await using var source = command.ThumbnailFile.OpenReadStream();
-                await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, command.ThumbnailFile.ContentType, cancellationToken);
+                await using var stream = await _watermarkService.ApplyAsync(source, sku, command.ThumbnailFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,
@@ -189,7 +196,7 @@ public sealed class CreateProductHandler : IRequestHandler<CreateProductCommand,
                         cancellationToken);
                 }
                 await using var source = image.ImageFile.OpenReadStream();
-                await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, image.ImageFile.ContentType, cancellationToken);
+                await using var stream = await _watermarkService.ApplyAsync(source, sku, image.ImageFile.ContentType, cancellationToken);
                 var url = await _fileStorage.UploadPublicAsync(
                     stream,
                     objectPath,

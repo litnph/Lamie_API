@@ -58,6 +58,14 @@ public sealed class OrdersController : ControllerBase
         return NoContent();
     }
 
+    [HttpPatch("{id:guid}/status/previous")]
+    [Authorize(Policy = PermissionNames.OrdersReverseStatus)]
+    public async Task<IActionResult> ReturnToPreviousStatus(Guid id, CancellationToken cancellationToken)
+    {
+        await _orderService.ReturnToPreviousStatusAsync(id, cancellationToken);
+        return NoContent();
+    }
+
     [HttpPatch("{id:guid}/payment-status")]
     [Authorize(Policy = PermissionNames.OrdersManage)]
     public async Task<IActionResult> ChangePaymentStatus(
@@ -66,6 +74,17 @@ public sealed class OrdersController : ControllerBase
         CancellationToken cancellationToken)
     {
         await _orderService.ChangePaymentStatusAsync(id, request.Status, cancellationToken);
+        return NoContent();
+    }
+
+    [HttpPatch("{id:guid}/shipping-fee-actual")]
+    [Authorize(Policy = PermissionNames.OrdersManage)]
+    public async Task<IActionResult> UpdateShippingFeeActual(
+        Guid id,
+        UpdateShippingFeeActualRequest request,
+        CancellationToken cancellationToken)
+    {
+        await _orderService.UpdateShippingFeeActualAsync(id, request.ShippingFeeActual, cancellationToken);
         return NoContent();
     }
 

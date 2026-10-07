@@ -15,6 +15,7 @@ namespace Lamie.Domain.Entities
         private readonly List<ProductStyle> _styles = new();
         private readonly List<ProductOccasion> _occasions = new();
         private readonly List<ProductIngredient> _ingredients = new();
+        private readonly List<ProductInventoryMaterial> _inventoryMaterials = new();
         private readonly List<ProductSimilarProduct> _similarProducts = new();
 
         public int Id { get; private set; }
@@ -41,6 +42,7 @@ namespace Lamie.Domain.Entities
         public IReadOnlyCollection<ProductStyle> Styles => _styles;
         public IReadOnlyCollection<ProductOccasion> Occasions => _occasions;
         public IReadOnlyCollection<ProductIngredient> Ingredients => _ingredients;
+        public IReadOnlyCollection<ProductInventoryMaterial> InventoryMaterials => _inventoryMaterials;
         public IReadOnlyCollection<ProductSimilarProduct> SimilarProducts => _similarProducts;
 
         private Product() { } // EF
@@ -275,6 +277,25 @@ namespace Lamie.Domain.Entities
                 var existing = _ingredients.FirstOrDefault(item => item.IngredientId == definition.IngredientId);
                 if (existing is null)
                     _ingredients.Add(new ProductIngredient(definition));
+                else
+                    existing.Update(definition);
+            }
+        }
+
+        public void ReplaceInventoryMaterials(IEnumerable<ProductInventoryMaterialDefinition> definitions)
+        {
+            var requested = definitions.ToList();
+            if (requested.GroupBy(item => item.StockUnitId).Any(group => group.Count() > 1))
+                throw new DomainException("Product inventory material stock units must be unique");
+
+            var requestedIds = requested.Select(item => item.StockUnitId).ToHashSet();
+            _inventoryMaterials.RemoveAll(item => !requestedIds.Contains(item.StockUnitId));
+
+            foreach (var definition in requested)
+            {
+                var existing = _inventoryMaterials.FirstOrDefault(item => item.StockUnitId == definition.StockUnitId);
+                if (existing is null)
+                    _inventoryMaterials.Add(new ProductInventoryMaterial(definition));
                 else
                     existing.Update(definition);
             }

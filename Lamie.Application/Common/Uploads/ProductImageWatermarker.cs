@@ -26,6 +26,13 @@ public static class ProductImageWatermarker
         string sku,
         string contentType,
         CancellationToken cancellationToken = default)
+        => await ApplySkuAsync(source, sku, contentType, cancellationToken);
+
+    public static async Task<MemoryStream> ApplySkuAsync(
+        Stream source,
+        string sku,
+        string contentType,
+        CancellationToken cancellationToken = default)
     {
         using var image = await Image.LoadAsync<Rgba32>(source, cancellationToken);
         var text = sku.Trim().ToUpperInvariant();
@@ -46,7 +53,7 @@ public static class ProductImageWatermarker
         var fontSize = Math.Clamp((float)(shortEdge * .048), 14f, 72f);
         var font = CreateFont(fontSize);
         var textOptions = new TextOptions(font) { KerningMode = KerningMode.Standard };
-        var measured = TextMeasurer.MeasureSize(text, textOptions);
+        var measured = TextMeasurer.MeasureBounds(text, textOptions);
         var maximumTextWidth = Math.Max(1, image.Width - margin * 2 - horizontalPadding * 2);
         var maximumTextHeight = Math.Max(1, image.Height - margin * 2 - verticalPadding * 2);
         var scale = Math.Min(
@@ -58,22 +65,65 @@ public static class ProductImageWatermarker
             fontSize = Math.Max(1f, fontSize * scale);
             font = CreateFont(fontSize);
             textOptions = new TextOptions(font) { KerningMode = KerningMode.Standard };
-            measured = TextMeasurer.MeasureSize(text, textOptions);
+            measured = TextMeasurer.MeasureBounds(text, textOptions);
         }
         var width = Math.Min(image.Width - margin * 2, (int)Math.Ceiling(measured.Width) + horizontalPadding * 2);
         var height = Math.Min(image.Height - margin * 2, (int)Math.Ceiling(measured.Height) + verticalPadding * 2);
         width = Math.Max(1, width);
         height = Math.Max(1, height);
-        var left = Math.Max(0, (image.Width - width) / 2);
+        var left = Math.Max(0, image.Width - width - margin);
         var top = Math.Max(0, image.Height - height - margin);
 
         FillRoundedRectangle(image, left, top, width, height, radius, WatermarkBackground);
-        var textLeft = left + (width - measured.Width) / 2f;
-        var textTop = top + (height - measured.Height) / 2f;
+        // DrawText positions the font layout origin, while MeasureBounds describes the
+        // visible glyphs relative to that origin. Offset by X/Y so the rendered SKU,
+        // rather than the font's line box, is centered inside the watermark panel.
+        var textLeft = left + (width - measured.Width) / 2f - measured.X;
+        var textTop = top + (height - measured.Height) / 2f - measured.Y;
         image.Mutate(context => context.DrawText(text, font, Color.White, new PointF(textLeft, textTop)));
 
         var output = new MemoryStream();
         await image.SaveAsync(output, Encoder(contentType), cancellationToken);
+        output.Position = 0;
+        return output;
+    }
+
+    public static async Task<MemoryStream> ApplyImageAsync(
+        Stream source,
+        Stream watermarkSource,
+        string contentType,
+        CancellationToken cancellationToken = default)
+    {
+        using var image = await Image.LoadAsync<Rgba32>(source, cancellationToken);
+        using var watermark = await Image.LoadAsync<Rgba32>(watermarkSource, cancellationToken);
+        if (watermark.Width <= 0 || watermark.Height <= 0)
+            throw new InvalidDataException("Watermark image is empty.");
+
+        var shortEdge = Math.Min(image.Width, image.Height);
+        var margin = Math.Min(
+            Math.Clamp((int)Math.Round(shortEdge * .025), 4, 48),
+            Math.Max(1, shortEdge / 8));
+        var maximumWidth = Math.Max(1, Math.Min(image.Width - margin * 2, (int)Math.Round(image.Width * .28)));
+        var maximumHeight = Math.Max(1, Math.Min(image.Height - margin * 2, (int)Math.Round(image.Height * .20)));
+        var scale = Math.Min(1d, Math.Min(maximumWidth / (double)watermark.Width, maximumHeight / (double)watermark.Height));
+        var width = Math.Max(1, (int)Math.Round(watermark.Width * scale));
+        var height = Math.Max(1, (int)Math.Round(watermark.Height * scale));
+        watermark.Mutate(context => context.Resize(width, height));
+        var location = new Point(Math.Max(0, image.Width - width - margin), Math.Max(0, image.Height - height - margin));
+        image.Mutate(context => context.DrawImage(watermark, location, .72f));
+
+        var output = new MemoryStream();
+        await image.SaveAsync(output, Encoder(contentType), cancellationToken);
+        output.Position = 0;
+        return output;
+    }
+
+    public static async Task<MemoryStream> CopyAsync(
+        Stream source,
+        CancellationToken cancellationToken = default)
+    {
+        var output = new MemoryStream();
+        await source.CopyToAsync(output, cancellationToken);
         output.Position = 0;
         return output;
     }

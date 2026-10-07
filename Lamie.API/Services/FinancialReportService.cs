@@ -83,6 +83,60 @@ public sealed class FinancialReportService : IFinancialReportService
             .ThenBy(row => row.Name)
             .ToListAsync(cancellationToken);
 
+        var eligibleOrderItems =
+            from item in _dbContext.OrderItems.AsNoTracking()
+            join order in _dbContext.Orders.AsNoTracking() on item.OrderId equals order.Id
+            where order.DeliveryAt >= startUtc
+                  && order.DeliveryAt < endExclusiveUtc
+                  && order.PaymentStatus == PaymentStatus.Paid
+                  && order.OrderStatus != OrderStatus.Cancelled
+            select new { Item = item, Order = order };
+
+        var productLineRows = await eligibleOrderItems
+            .GroupBy(row => new { row.Item.ProductTypeId, row.Item.ProductTypeName })
+            .Select(group => new
+            {
+                Id = group.Key.ProductTypeId,
+                Name = group.Key.ProductTypeName,
+                Revenue = group.Sum(row => row.Item.LineTotal)
+            })
+            .ToListAsync(cancellationToken);
+
+        var categoryRevenueRows = await (
+                from row in eligibleOrderItems
+                join product in _dbContext.Products.AsNoTracking()
+                    on row.Item.ProductId equals (int?)product.Id into products
+                from product in products.DefaultIfEmpty()
+                group row by new
+                {
+                    Id = row.Item.CategoryId ?? (int?)product.CategoryId,
+                    row.Item.CategoryName
+                }
+                into categoryRevenue
+                select new
+                {
+                    categoryRevenue.Key.Id,
+                    Name = categoryRevenue.Key.CategoryName,
+                    Revenue = categoryRevenue.Sum(row => row.Item.LineTotal)
+                })
+            .ToListAsync(cancellationToken);
+
+        var categoryIds = categoryRevenueRows
+            .Where(row => row.Id.HasValue)
+            .Select(row => row.Id!.Value)
+            .Distinct()
+            .ToList();
+        var categoryTranslations = await _dbContext.CategoryTranslations
+            .AsNoTracking()
+            .Where(translation => categoryIds.Contains(translation.CategoryId))
+            .Select(translation => new { translation.CategoryId, translation.LanguageCode, translation.Name })
+            .ToListAsync(cancellationToken);
+        var categoryNames = categoryTranslations
+            .GroupBy(translation => translation.CategoryId)
+            .ToDictionary(
+                group => group.Key,
+                group => PreferredTranslationName(group.Select(item => (item.LanguageCode, item.Name))));
+
         var revenueByDate = revenueRows.ToDictionary(
             row => DateOnly.FromDateTime(row.Date),
             row => new DailyRevenue(row.ProductRevenue, row.ShippingFee, row.OrderCount));
@@ -123,7 +177,31 @@ public sealed class FinancialReportService : IFinancialReportService
         {
             ProductRevenue = productRevenue,
             ShippingFee = shippingFee,
-            IncludeShippingFeeInRevenue = query.IncludeShippingFeeInRevenue
+            IncludeShippingFeeInRevenue = query.IncludeShippingFeeInRevenue,
+            RevenueByProductLine = productLineRows
+                .GroupBy(row => row.Id)
+                .Select(group => new ProductRevenueBreakdownDto(
+                    group.Key,
+                    group.Select(row => row.Name).FirstOrDefault(name => !string.IsNullOrWhiteSpace(name)) ?? "Chưa phân loại",
+                    group.Sum(row => row.Revenue)))
+                .OrderByDescending(row => row.Revenue)
+                .ThenBy(row => row.Name)
+                .ToList(),
+            RevenueByCategory = categoryRevenueRows
+                .GroupBy(row => row.Id)
+                .Select(group =>
+                {
+                    var snapshotName = group.Select(row => row.Name)
+                        .FirstOrDefault(name => !string.IsNullOrWhiteSpace(name));
+                    var name = snapshotName
+                        ?? (group.Key.HasValue && categoryNames.TryGetValue(group.Key.Value, out var categoryName)
+                            ? categoryName
+                            : "Chưa phân loại");
+                    return new ProductRevenueBreakdownDto(group.Key, name, group.Sum(row => row.Revenue));
+                })
+                .OrderByDescending(row => row.Revenue)
+                .ThenBy(row => row.Name)
+                .ToList()
         };
     }
 
@@ -171,6 +249,15 @@ public sealed class FinancialReportService : IFinancialReportService
 
     public static bool CountsAsRevenue(PaymentStatus paymentStatus, OrderStatus orderStatus) =>
         paymentStatus == PaymentStatus.Paid && orderStatus != OrderStatus.Cancelled;
+
+    private static string PreferredTranslationName(IEnumerable<(string LanguageCode, string Name)> translations)
+    {
+        var values = translations.ToList();
+        return values.FirstOrDefault(item => item.LanguageCode.StartsWith("vi", StringComparison.OrdinalIgnoreCase)).Name
+               ?? values.FirstOrDefault(item => item.LanguageCode.StartsWith("en", StringComparison.OrdinalIgnoreCase)).Name
+               ?? values.FirstOrDefault().Name
+               ?? "Chưa phân loại";
+    }
 
     private static IReadOnlyList<FinancialReportPointDto> BuildDailyPoints(
         DateOnly rangeStart,

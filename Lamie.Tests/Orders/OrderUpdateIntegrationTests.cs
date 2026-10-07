@@ -2,6 +2,7 @@ using Lamie.API.Models.Orders;
 using Lamie.API.Services;
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Common.Storage;
+using Lamie.Application.Inventory;
 using Lamie.Application.Orders;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Exceptions;
@@ -14,6 +15,109 @@ namespace Lamie.Tests.Orders;
 
 public sealed class OrderUpdateIntegrationTests
 {
+    [Fact]
+    public async Task CreateOrderPersistsActualShippingFee()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("SHIPPING-ACTUAL", 0, false, 100_000));
+        var product = environment.Products[0];
+
+        var created = await environment.Service.CreateAsync(new CreateOrderForm
+        {
+            CreateMember = false,
+            PickupAtShop = false,
+            DeliveryAddress = "461 Phan Van Tri",
+            DeliveryAt = TestEnvironment.Now.AddDays(1),
+            ShippingFee = 50_000,
+            ShippingFeeActual = 42_000,
+            Items =
+            [
+                new OrderLineRequest
+                {
+                    ProductId = product.Id.ToString(),
+                    ProductName = "Hoa",
+                    UnitPrice = 100_000,
+                    Quantity = 1
+                }
+            ]
+        }, CancellationToken.None);
+
+        Assert.Equal(42_000, created.ShippingFeeActual);
+        environment.DbContext.ChangeTracker.Clear();
+        Assert.Equal(42_000, (await environment.DbContext.Orders.SingleAsync()).ShippingFeeActual);
+    }
+
+    [Fact]
+    public async Task CreateOutsideCatalogItemPersistsSelectedCategoryAndProductType()
+    {
+        await using var environment = await TestEnvironment.CreateAsync();
+        var categoryId = await environment.DbContext.Categories.Select(category => category.Id).SingleAsync();
+        var productTypeId = await environment.DbContext.ProductTypes.Select(productType => productType.Id).SingleAsync();
+
+        var created = await environment.Service.CreateAsync(new CreateOrderForm
+        {
+            CreateMember = false,
+            PickupAtShop = true,
+            DeliveryAt = TestEnvironment.Now.AddDays(1),
+            Items =
+            [
+                new OrderLineRequest
+                {
+                    CategoryId = categoryId,
+                    ProductTypeId = productTypeId,
+                    ProductName = "Sản phẩm ngoài danh mục",
+                    UnitPrice = 350_000,
+                    Quantity = 1
+                }
+            ]
+        }, CancellationToken.None);
+
+        var item = Assert.Single(created.Items);
+        Assert.Equal(categoryId, item.CategoryId);
+        Assert.Equal(productTypeId, item.ProductTypeId);
+    }
+
+    [Fact]
+    public async Task CreateOrderUsesExplicitMemberIntentAndKeepsContactsOptional()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("MEMBER-FLOW", 0, false, 100_000));
+        var product = environment.Products[0];
+        var existing = new Customer("Member gốc", "0901234567", null, null, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.Customers.Add(existing);
+        await environment.DbContext.SaveChangesAsync();
+
+        CreateOrderForm Form(string name, string phone, bool createMember, Guid? customerId = null) => new()
+        {
+            OrdererName = name,
+            OrdererPhone = phone,
+            CustomerId = customerId,
+            CreateMember = createMember,
+            SenderName = "Người gửi",
+            PickupAtShop = true,
+            DeliveryAt = TestEnvironment.Now.AddDays(1),
+            Items = [new OrderLineRequest { ProductId = product.Id.ToString(), ProductName = "Hoa", UnitPrice = 100_000, Quantity = 1 }]
+        };
+
+        var withoutMember = await environment.Service.CreateAsync(Form(string.Empty, string.Empty, false), CancellationToken.None);
+        var nameOnly = await environment.Service.CreateAsync(Form("Khách mới", string.Empty, true), CancellationToken.None);
+        var selected = await environment.Service.CreateAsync(Form("Tên chỉ dùng trên đơn", "0999999999", false, existing.Id), CancellationToken.None);
+
+        Assert.Null(withoutMember.CustomerId);
+        Assert.Empty(withoutMember.RecipientName);
+        Assert.Empty(withoutMember.RecipientPhone);
+        Assert.Equal("Người gửi", withoutMember.SenderName);
+        Assert.NotNull(nameOnly.CustomerId);
+        Assert.Equal(existing.Id, selected.CustomerId);
+        environment.DbContext.ChangeTracker.Clear();
+        var persistedExisting = await environment.DbContext.Customers.SingleAsync(customer => customer.Id == existing.Id);
+        Assert.Equal("Member gốc", persistedExisting.Name);
+        Assert.Equal("0901234567", persistedExisting.Phone);
+
+        await Assert.ThrowsAsync<ConflictException>(() =>
+            environment.Service.CreateAsync(Form("Tên khác", "0901234567", true), CancellationToken.None));
+    }
+
     [Fact]
     public async Task SameProductLinesKeepIndependentIngredientSnapshotsWhenProductRecipeChanges()
     {
@@ -142,6 +246,56 @@ public sealed class OrderUpdateIntegrationTests
     }
 
     [Fact]
+    public async Task CreatedOrderCanBeUpdatedWithoutRecipientPhone()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-NO-PHONE", 10, true, 100));
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
+        var before = await environment.Service.GetAsync(order.Id, CancellationToken.None);
+
+        var updated = await environment.Service.UpdateAsync(
+            order.Id,
+            CreateUpdateForm(before, environment.Products[0], quantity: 1, overrides: new UpdateOverrides
+            {
+                ClearRecipientPhone = true
+            }),
+            CancellationToken.None);
+
+        Assert.Empty(updated.RecipientPhone);
+        Assert.Equal(before.OrdererPhone, updated.OrdererPhone);
+    }
+
+    [Fact]
+    public async Task CreatedOrderUpdatePersistsInventoryMaterialsThroughExistingInventoryService()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-MATERIAL", 10, true, 100));
+        var measurementUnit = new MeasurementUnit("STEM", "Cành", "cành", true, true, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.MeasurementUnits.Add(measurementUnit);
+        await environment.DbContext.SaveChangesAsync();
+        var inventoryItem = new InventoryItem("ROSE_STEM", "Cành hồng", measurementUnit.Id, null, true, TestEnvironment.Now.UtcDateTime);
+        var stockUnit = new InventoryStockUnit(inventoryItem.Id, null, 5, true, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.AddRange(inventoryItem, stockUnit);
+        await environment.DbContext.SaveChangesAsync();
+
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
+        var before = await environment.Service.GetAsync(order.Id, CancellationToken.None);
+        var updated = await environment.Service.UpdateAsync(
+            order.Id,
+            CreateUpdateForm(before, environment.Products[0], quantity: 1, overrides: new UpdateOverrides
+            {
+                Materials = [new SaveOrderMaterialItem(null, stockUnit.Id, 2.5m)]
+            }),
+            CancellationToken.None);
+
+        var material = Assert.Single(updated.Materials!);
+        Assert.Equal(stockUnit.Id, material.StockUnitId);
+        Assert.Equal(2.5m, material.RequiredQuantity);
+        Assert.Equal(0, material.DeductedQuantity);
+        Assert.Single(await environment.DbContext.OrderMaterials.Where(item => item.OrderId == order.Id).ToListAsync());
+    }
+
+    [Fact]
     public async Task EditedQuantityIsReservedWhenCreatedOrderMovesToProducing()
     {
         await using var environment = await TestEnvironment.CreateAsync(
@@ -201,6 +355,41 @@ public sealed class OrderUpdateIntegrationTests
         Assert.Equal(5, (await environment.DbContext.Products.SingleAsync()).Stock);
         var persistedOrder = await environment.DbContext.Orders.SingleAsync();
         Assert.Equal(OrderStatus.Cancelled, persistedOrder.OrderStatus);
+        Assert.False(persistedOrder.InventoryReserved);
+    }
+
+    [Fact]
+    public async Task ReturningProducingOrderToCreatedRestoresProductAndMaterialInventory()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-REVERSE", 5, true, 100));
+        var measurementUnit = new MeasurementUnit("STEM-REVERSE", "Cành", "cành", true, true, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.MeasurementUnits.Add(measurementUnit);
+        await environment.DbContext.SaveChangesAsync();
+        var inventoryItem = new InventoryItem("ROSE_STEM_REVERSE", "Cành hồng", measurementUnit.Id, null, true, TestEnvironment.Now.UtcDateTime);
+        var stockUnit = new InventoryStockUnit(inventoryItem.Id, null, 10, true, TestEnvironment.Now.UtcDateTime);
+        stockUnit.Add(10, TestEnvironment.Now.UtcDateTime);
+        environment.DbContext.AddRange(inventoryItem, stockUnit);
+        await environment.DbContext.SaveChangesAsync();
+
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 3)]);
+        var before = await environment.Service.GetAsync(order.Id, CancellationToken.None);
+        await environment.Service.UpdateAsync(
+            order.Id,
+            CreateUpdateForm(before, environment.Products[0], quantity: 3, overrides: new UpdateOverrides
+            {
+                Materials = [new SaveOrderMaterialItem(null, stockUnit.Id, 2.5m)]
+            }),
+            CancellationToken.None);
+        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+        await environment.Service.ReturnToPreviousStatusAsync(order.Id, CancellationToken.None);
+        environment.DbContext.ChangeTracker.Clear();
+
+        Assert.Equal(5, (await environment.DbContext.Products.SingleAsync()).Stock);
+        Assert.Equal(10, (await environment.DbContext.InventoryStockUnits.SingleAsync()).Quantity);
+        Assert.Equal(0, (await environment.DbContext.OrderMaterials.SingleAsync()).DeductedQuantity);
+        var persistedOrder = await environment.DbContext.Orders.SingleAsync();
+        Assert.Equal(OrderStatus.Created, persistedOrder.OrderStatus);
         Assert.False(persistedOrder.InventoryReserved);
     }
 
@@ -332,7 +521,9 @@ public sealed class OrderUpdateIntegrationTests
             OrdererPhone = overrides?.OrdererPhone ?? order.OrdererPhone,
             ChannelId = order.ChannelId,
             RecipientName = overrides?.RecipientName ?? order.RecipientName,
-            RecipientPhone = overrides?.RecipientPhone ?? order.RecipientPhone,
+            RecipientPhone = overrides?.ClearRecipientPhone == true
+                ? null
+                : overrides?.RecipientPhone ?? order.RecipientPhone,
             PickupAtShop = order.PickupAtShop,
             ProvinceShipping = order.ProvinceShipping,
             DeliveryAddress = overrides?.DeliveryAddress ?? order.DeliveryAddress,
@@ -347,7 +538,9 @@ public sealed class OrderUpdateIntegrationTests
             Description = overrides?.Description ?? order.Description,
             ContentNote = overrides?.ContentNote ?? order.ContentNote,
             Items = overrides?.Items?.ToList()
-                ?? [CreateLine(order.Items.Single(), product, quantity, unitPrice ?? product.Price)]
+                ?? [CreateLine(order.Items.Single(), product, quantity, unitPrice ?? product.Price)],
+            MaterialsSpecified = overrides?.Materials is not null,
+            Materials = overrides?.Materials?.ToList() ?? []
         };
 
     private static OrderLineRequest CreateLine(
@@ -377,6 +570,7 @@ public sealed class OrderUpdateIntegrationTests
         public string? OrdererPhone { get; init; }
         public string? RecipientName { get; init; }
         public string? RecipientPhone { get; init; }
+        public bool ClearRecipientPhone { get; init; }
         public string? DeliveryAddress { get; init; }
         public string? DeliveryAddressDescription { get; init; }
         public DateTimeOffset? DeliveryAt { get; init; }
@@ -386,6 +580,7 @@ public sealed class OrderUpdateIntegrationTests
         public string? Description { get; init; }
         public string? ContentNote { get; init; }
         public IReadOnlyCollection<OrderLineRequest>? Items { get; init; }
+        public IReadOnlyCollection<SaveOrderMaterialItem>? Materials { get; init; }
     }
 
     private sealed class TestEnvironment : IAsyncDisposable
@@ -402,11 +597,11 @@ public sealed class OrderUpdateIntegrationTests
             _databaseName = databaseName;
             DbContext = dbContext;
             Products = products;
-            Service = new OrderService(
-                dbContext,
-                new NullFileStorage(),
-                new HttpContextAccessor(),
-                new FixedTimeProvider(Now));
+            var fileStorage = new NullFileStorage();
+            var httpContextAccessor = new HttpContextAccessor();
+            var timeProvider = new FixedTimeProvider(Now);
+            var inventoryService = new InventoryService(dbContext, fileStorage, httpContextAccessor, timeProvider);
+            Service = new OrderService(dbContext, fileStorage, httpContextAccessor, timeProvider, inventoryService);
         }
 
         public AppDbContext DbContext { get; }

@@ -29,6 +29,37 @@ public sealed class OrderApiContractTests
     }
 
     [Fact]
+    public void RecipientPhoneIsOptionalWhenCreatingAnOrder()
+    {
+        var property = typeof(CreateOrderForm).GetProperty(nameof(CreateOrderForm.RecipientPhone));
+
+        Assert.NotNull(property);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property!).WriteState);
+    }
+
+    [Fact]
+    public void RecipientPhoneIsOptionalWhenUpdatingAnOrder()
+    {
+        var property = typeof(UpdateOrderForm).GetProperty(nameof(UpdateOrderForm.RecipientPhone));
+
+        Assert.NotNull(property);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property!).WriteState);
+    }
+
+    [Theory]
+    [InlineData(typeof(CreateOrderForm), nameof(CreateOrderForm.SenderName))]
+    [InlineData(typeof(CreateOrderForm), nameof(CreateOrderForm.SenderPhone))]
+    [InlineData(typeof(UpdateOrderForm), nameof(UpdateOrderForm.SenderName))]
+    [InlineData(typeof(UpdateOrderForm), nameof(UpdateOrderForm.SenderPhone))]
+    public void SenderContactsAreOptionalAtTheMultipartModelBindingBoundary(Type formType, string propertyName)
+    {
+        var property = formType.GetProperty(propertyName);
+
+        Assert.NotNull(property);
+        Assert.Equal(NullabilityState.Nullable, new NullabilityInfoContext().Create(property!).WriteState);
+    }
+
+    [Fact]
     public void UpdateAcceptsAnOptionalRowVersionForBackwardCompatibleConcurrencyChecks()
     {
         var property = typeof(UpdateOrderForm).GetProperty(nameof(UpdateOrderForm.RowVersion));
@@ -46,6 +77,13 @@ public sealed class OrderApiContractTests
     }
 
     [Fact]
+    public void CreateAndUpdateAcceptAnOptionalActualShippingFee()
+    {
+        Assert.Equal(typeof(decimal?), typeof(CreateOrderForm).GetProperty(nameof(CreateOrderForm.ShippingFeeActual))?.PropertyType);
+        Assert.Equal(typeof(decimal?), typeof(UpdateOrderForm).GetProperty(nameof(UpdateOrderForm.ShippingFeeActual))?.PropertyType);
+    }
+
+    [Fact]
     public void ControllerExposesBatchRouteWithTheSameManagePolicyAsSingleCreate()
     {
         var controllerPolicy = Assert.Single(
@@ -58,7 +96,9 @@ public sealed class OrderApiContractTests
         AssertRoute(nameof(OrdersController.CreateBatch), typeof(HttpPostAttribute), "batch", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.Update), typeof(HttpPutAttribute), "{id:guid}", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.ChangeStatus), typeof(HttpPatchAttribute), "{id:guid}/status", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.ReturnToPreviousStatus), typeof(HttpPatchAttribute), "{id:guid}/status/previous", PermissionNames.OrdersReverseStatus);
         AssertRoute(nameof(OrdersController.ChangePaymentStatus), typeof(HttpPatchAttribute), "{id:guid}/payment-status", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.UpdateShippingFeeActual), typeof(HttpPatchAttribute), "{id:guid}/shipping-fee-actual", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.Delete), typeof(HttpDeleteAttribute), "{id:guid}", PermissionNames.OrdersCancel);
         AssertRoute(nameof(OrdersController.Calendar), typeof(HttpGetAttribute), "calendar");
         AssertRoute(nameof(OrdersController.CalendarLocations), typeof(HttpGetAttribute), "calendar/locations");

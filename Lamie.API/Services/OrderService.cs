@@ -1,3 +1,4 @@
+using System.Data;
 using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -38,6 +39,9 @@ public sealed class OrderService : IOrderService
         _timeProvider = timeProvider;
         _inventoryService = inventoryService;
     }
+
+    private IInventoryService RequireInventoryService() =>
+        _inventoryService ?? throw new InvalidOperationException("Inventory service is not configured.");
 
     public async Task<PagedOrdersDto> ListAsync(OrderListQuery request, CancellationToken cancellationToken)
     {
@@ -131,14 +135,24 @@ public sealed class OrderService : IOrderService
     {
         var uploadedUrls = new List<string>();
         var committed = false;
+        IReadOnlyList<Lamie.Application.Inventory.OrderMaterialDto>? materials = null;
         try
         {
             var order = await BuildOrderAsync(form, uploadedUrls, cancellationToken);
-            await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+            await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+                form.MaterialsSpecified ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
+                cancellationToken);
             _dbContext.Orders.Add(order);
             try
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
+                if (form.MaterialsSpecified)
+                {
+                    materials = await RequireInventoryService().SaveOrderMaterialsAsync(
+                        order.Id,
+                        new Lamie.Application.Inventory.SaveOrderMaterialsRequest(form.Materials, null),
+                        cancellationToken);
+                }
                 await transaction.CommitAsync(cancellationToken);
                 committed = true;
             }
@@ -148,7 +162,7 @@ public sealed class OrderService : IOrderService
                 throw new ConflictException("The order could not be created because its generated code conflicted. Please retry.");
             }
 
-            return ToDetailDto(order);
+            return ToDetailDto(order) with { Materials = materials };
         }
         finally
         {
@@ -181,7 +195,9 @@ public sealed class OrderService : IOrderService
         var uploadedUrls = new List<string>();
         var createdOrders = new List<BatchCreatedOrderDto>(form.Orders.Count);
         var committed = false;
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(
+            form.Orders.Any(item => item.MaterialsSpecified) ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
+            cancellationToken);
         for (var index = 0; index < form.Orders.Count; index++)
         {
             var orderForm = form.Orders[index];
@@ -191,6 +207,13 @@ public sealed class OrderService : IOrderService
                 var order = await BuildOrderAsync(orderForm, uploadedUrls, cancellationToken);
                 _dbContext.Orders.Add(order);
                 await _dbContext.SaveChangesAsync(cancellationToken);
+                if (orderForm.MaterialsSpecified)
+                {
+                    await RequireInventoryService().SaveOrderMaterialsAsync(
+                        order.Id,
+                        new Lamie.Application.Inventory.SaveOrderMaterialsRequest(orderForm.Materials, null),
+                        cancellationToken);
+                }
                 createdOrders.Add(new BatchCreatedOrderDto(clientDraftId, order.Id, order.OrderCode));
             }
             catch (OperationCanceledException)
@@ -242,6 +265,9 @@ public sealed class OrderService : IOrderService
         if (form.Id != Guid.Empty && form.Id != id)
             throw Validation(nameof(form.Id), "Route id and body id must match.");
         await EnsureActiveChannelAsync(form.ChannelId, cancellationToken);
+        await using var transaction = form.MaterialsSpecified
+            ? await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
         var actor = CurrentActor();
         var now = UtcNow();
         var order = await GetAggregateAsync(id, true, cancellationToken);
@@ -252,7 +278,13 @@ public sealed class OrderService : IOrderService
             cancellationToken,
             order.Items.ToDictionary(item => item.Id));
         var trackedChildren = CaptureTrackedChildren(order);
-        var customer = await FindOrCreateCustomerAsync(form.OrdererName, form.OrdererPhone ?? string.Empty, now, cancellationToken);
+        var customer = await ResolveCustomerAsync(
+            form.CustomerId,
+            form.CreateMember,
+            form.OrdererName,
+            form.OrdererPhone ?? string.Empty,
+            now,
+            cancellationToken);
         var address = await ResolveAddressSnapshotAsync(
             form.PickupAtShop,
             form.AddressScheme,
@@ -289,6 +321,7 @@ public sealed class OrderService : IOrderService
         var currentItems = order.Items.ToList();
 
         var uploadedUrls = new List<string>();
+        IReadOnlyList<Lamie.Application.Inventory.OrderMaterialDto>? materials = null;
         try
         {
             await ValidateImagesAsync(form.Images, currentItems.Count, cancellationToken);
@@ -304,21 +337,34 @@ public sealed class OrderService : IOrderService
             }
             TrackAddedChildren(order, trackedChildren);
             await _dbContext.SaveChangesAsync(cancellationToken);
+            if (form.MaterialsSpecified)
+            {
+                materials = await RequireInventoryService().SaveOrderMaterialsAsync(
+                    order.Id,
+                    new Lamie.Application.Inventory.SaveOrderMaterialsRequest(form.Materials, null),
+                    cancellationToken);
+            }
+            if (transaction is not null)
+                await transaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
+            if (transaction is not null)
+                await transaction.RollbackAsync(CancellationToken.None);
             await DeleteFilesBestEffortAsync(uploadedUrls);
             throw new ConflictException("Đơn hàng đã được xử lý bởi người khác, vui lòng tải lại.");
         }
         catch
         {
+            if (transaction is not null)
+                await transaction.RollbackAsync(CancellationToken.None);
             await DeleteFilesBestEffortAsync(uploadedUrls);
             throw;
         }
 
         await DeleteFilesBestEffortAsync(removedUrls);
 
-        return ToDetailDto(order);
+        return ToDetailDto(order) with { Materials = materials };
     }
 
     public async Task ChangeStatusAsync(Guid id, OrderStatus status, CancellationToken cancellationToken)
@@ -387,6 +433,48 @@ public sealed class OrderService : IOrderService
         }
     }
 
+    public async Task ReturnToPreviousStatusAsync(Guid id, CancellationToken cancellationToken)
+    {
+        var actor = CurrentActor();
+        await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
+        var order = await GetAggregateAsync(id, true, cancellationToken);
+        var target = order.PreviousStatus
+            ?? throw new ConflictException("Trạng thái hiện tại không thể trả về bước xử lý trước đó.");
+        var trackedChildren = CaptureTrackedChildren(order);
+
+        if (order.OrderStatus == OrderStatus.Producing && order.InventoryReserved)
+        {
+            var quantities = order.Items
+                .Where(item => item.ProductId.HasValue)
+                .GroupBy(item => item.ProductId!.Value)
+                .ToDictionary(group => group.Key, group => group.Sum(item => item.Quantity));
+            var products = await _dbContext.Products
+                .Where(product => quantities.Keys.Contains(product.Id))
+                .ToDictionaryAsync(product => product.Id, cancellationToken);
+            if (products.Count != quantities.Count)
+                throw new ConflictException("Một hoặc nhiều sản phẩm trong đơn không còn tồn tại.");
+
+            foreach (var (productId, quantity) in quantities)
+                products[productId].RestoreStock(quantity);
+        }
+
+        var now = UtcNow();
+        await ApplyMaterialLifecycleAsync(order, target, actor.Id, now, cancellationToken);
+        order.ReturnToPreviousStatus(false, now, actor.Id, actor.Name, "Trả đơn hàng về bước xử lý liền trước.");
+        TrackAddedChildren(order, trackedChildren);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw new ConflictException("Đơn hàng hoặc tồn kho đã thay đổi bởi người khác, vui lòng tải lại.");
+        }
+    }
+
     public async Task ChangePaymentStatusAsync(
         Guid id,
         PaymentStatus status,
@@ -397,6 +485,26 @@ public sealed class OrderService : IOrderService
         var order = await GetAggregateAsync(id, true, cancellationToken);
         var trackedChildren = CaptureTrackedChildren(order);
         order.ChangePaymentStatus(status, UtcNow(), actor.Id, actor.Name);
+        TrackAddedChildren(order, trackedChildren);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("Đơn hàng đã được xử lý bởi người khác, vui lòng tải lại.");
+        }
+    }
+
+    public async Task UpdateShippingFeeActualAsync(
+        Guid id,
+        decimal? shippingFeeActual,
+        CancellationToken cancellationToken)
+    {
+        var actor = CurrentActor();
+        var order = await GetAggregateAsync(id, true, cancellationToken);
+        var trackedChildren = CaptureTrackedChildren(order);
+        order.UpdateShippingFeeActual(shippingFeeActual, UtcNow(), actor.Id, actor.Name);
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -511,7 +619,9 @@ public sealed class OrderService : IOrderService
             : form.ChannelId.Value;
         await EnsureActiveChannelAsync(channelId, cancellationToken);
         var snapshots = await ResolveSnapshotsAsync(form.Items, now, cancellationToken);
-        var customer = await FindOrCreateCustomerAsync(
+        var customer = await ResolveCustomerAsync(
+            form.CustomerId,
+            form.CreateMember,
             form.OrdererName,
             form.OrdererPhone ?? string.Empty,
             now,
@@ -577,14 +687,35 @@ public sealed class OrderService : IOrderService
             throw new ConflictException("The selected channel is inactive.");
     }
 
-    private async Task<Customer?> FindOrCreateCustomerAsync(
+    private async Task<Customer?> ResolveCustomerAsync(
+        Guid? customerId,
+        bool? createMember,
         string name,
         string phone,
         DateTime now,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(phone))
+        if (customerId.HasValue)
+        {
+            return await _dbContext.Customers
+                .SingleOrDefaultAsync(customer => customer.Id == customerId && customer.IsActive, cancellationToken)
+                ?? throw new NotFoundException(nameof(Customer), customerId.Value);
+        }
+
+        if (createMember == false || (string.IsNullOrWhiteSpace(name) && string.IsNullOrWhiteSpace(phone)))
             return null;
+
+        // Requests that predate CreateMember keep the former exact-phone linking behavior.
+        // Explicit new Admin requests never infer a link: staff must choose the existing Member.
+        var legacyRequest = !createMember.HasValue;
+        if (string.IsNullOrWhiteSpace(phone))
+        {
+            if (legacyRequest)
+                return null;
+            var nameOnlyCustomer = new Customer(name, string.Empty, null, null, now);
+            _dbContext.Customers.Add(nameOnlyCustomer);
+            return nameOnlyCustomer;
+        }
 
         var normalizedPhone = Customer.NormalizePhone(phone);
         var matches = await _dbContext.Customers
@@ -594,10 +725,13 @@ public sealed class OrderService : IOrderService
             .ToListAsync(cancellationToken);
         if (matches.Count == 1)
         {
-            var existing = matches[0];
-            existing.Update(name, phone, existing.Email, existing.Notes, existing.IsActive, now);
-            return existing;
+            if (legacyRequest)
+                return matches[0];
+            throw new ConflictException("A Member with this phone already exists. Select that Member before saving the order.");
         }
+
+        if (matches.Count > 1)
+            throw new ConflictException("Multiple Members use this phone. Select the intended Member before saving the order.");
 
         var customer = new Customer(name, phone, null, null, now);
         _dbContext.Customers.Add(customer);
@@ -614,6 +748,7 @@ public sealed class OrderService : IOrderService
             throw Validation(nameof(lines), "At least one order item is required.");
 
         var ids = new HashSet<int>();
+        var categoryIds = new HashSet<int>();
         var productTypeIds = new HashSet<int>();
         var skus = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var line in lines)
@@ -628,6 +763,10 @@ public sealed class OrderService : IOrderService
             }
             if (!string.IsNullOrWhiteSpace(line.ProductSku))
                 skus.Add(line.ProductSku.Trim());
+            if (line.CategoryId is <= 0)
+                throw Validation(nameof(line.CategoryId), "Category id must be a positive integer.");
+            if (line.CategoryId.HasValue)
+                categoryIds.Add(line.CategoryId.Value);
             if (line.ProductTypeId is <= 0)
                 throw Validation(nameof(line.ProductTypeId), "Product type id must be a positive integer.");
             if (line.ProductTypeId.HasValue)
@@ -653,6 +792,12 @@ public sealed class OrderService : IOrderService
             .ToListAsync(cancellationToken);
         foreach (var productTypeId in products.Select(product => product.ProductTypeId).OfType<int>())
             productTypeIds.Add(productTypeId);
+        foreach (var categoryId in products.Select(product => product.CategoryId))
+            categoryIds.Add(categoryId);
+        var categories = await _dbContext.Categories.AsNoTracking()
+            .Include(category => category.Translations)
+            .Where(category => categoryIds.Contains(category.Id))
+            .ToDictionaryAsync(category => category.Id, cancellationToken);
         var productTypes = await _dbContext.ProductTypes.AsNoTracking()
             .Include(productType => productType.Translations)
             .Where(productType => productTypeIds.Contains(productType.Id))
@@ -660,7 +805,7 @@ public sealed class OrderService : IOrderService
         var ingredientIds = products
             .SelectMany(product => product.Ingredients)
             .Select(recipe => recipe.IngredientId)
-            .Concat(lines.SelectMany(line => line.Ingredients ?? [] ).Select(item => item.IngredientId))
+            .Concat(lines.SelectMany(line => line.Ingredients ?? []).Select(item => item.IngredientId))
             .Distinct()
             .ToArray();
         var ingredientSnapshots = await (
@@ -706,6 +851,21 @@ public sealed class OrderService : IOrderService
                     throw Validation(nameof(line.Id), "Order item id does not belong to this order.");
             }
 
+            var resolvedCategoryId = product?.CategoryId ?? line.CategoryId;
+            Category? resolvedCategory = null;
+            if (resolvedCategoryId.HasValue)
+            {
+                if (!categories.TryGetValue(resolvedCategoryId.Value, out resolvedCategory))
+                    throw new NotFoundException(nameof(Category), resolvedCategoryId.Value);
+                if (product is null && !resolvedCategory.IsActive)
+                    throw new ConflictException($"Danh mục #{resolvedCategory.Id} đã ngừng hoạt động.");
+            }
+            var resolvedCategoryName = resolvedCategory?.Translations
+                .OrderByDescending(translation => translation.LanguageCode.StartsWith("vi", StringComparison.OrdinalIgnoreCase))
+                .ThenBy(translation => translation.LanguageCode)
+                .Select(translation => translation.Name)
+                .FirstOrDefault();
+
             var resolvedProductTypeId = product?.ProductTypeId ?? line.ProductTypeId;
             ProductType? resolvedProductType = null;
             if (resolvedProductTypeId.HasValue)
@@ -716,7 +876,7 @@ public sealed class OrderService : IOrderService
                     throw new ConflictException($"Dòng sản phẩm '{resolvedProductType.Code}' đã ngừng hoạt động.");
             }
             var resolvedProductTypeName = resolvedProductType?.Translations
-                .OrderByDescending(translation => translation.LanguageCode.Equals("vi", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(translation => translation.LanguageCode.StartsWith("vi", StringComparison.OrdinalIgnoreCase))
                 .ThenBy(translation => translation.LanguageCode)
                 .Select(translation => translation.Name)
                 .FirstOrDefault() ?? resolvedProductType?.Code;
@@ -757,7 +917,9 @@ public sealed class OrderService : IOrderService
                     recipe,
                     recipe is null ? null : capturedAtUtc,
                     resolvedProductTypeId,
-                    resolvedProductTypeName));
+                    resolvedProductTypeName,
+                    resolvedCategoryId,
+                    resolvedCategoryName));
             }
             else
             {
@@ -781,7 +943,9 @@ public sealed class OrderService : IOrderService
                     recipe,
                     recipe is null ? null : capturedAtUtc,
                     resolvedProductTypeId,
-                    resolvedProductTypeName));
+                    resolvedProductTypeName,
+                    resolvedCategoryId,
+                    resolvedCategoryName));
             }
         }
 
@@ -962,7 +1126,7 @@ public sealed class OrderService : IOrderService
         form.OrdererName,
         form.OrdererPhone ?? string.Empty,
         form.RecipientName,
-        form.RecipientPhone,
+        form.RecipientPhone ?? string.Empty,
         form.PickupAtShop,
         form.ProvinceShipping,
         address.FullAddressSnapshot,
@@ -973,7 +1137,7 @@ public sealed class OrderService : IOrderService
         form.DeliveryTo?.UtcDateTime,
         deposit,
         form.ShippingFee,
-        null,
+        form.ShippingFeeActual,
         form.Description,
         form.ContentNote,
         address.Scheme,
@@ -984,14 +1148,16 @@ public sealed class OrderService : IOrderService
         address.CommuneCode,
         address.CommuneName,
         address.AddressDetail,
-        address.FullAddressSnapshot);
+        address.FullAddressSnapshot,
+        form.SenderName ?? string.Empty,
+        form.SenderPhone ?? string.Empty);
     }
 
     private static OrderDetails ToDetails(UpdateOrderForm form, OrderAddressSnapshot address) => new(
         form.OrdererName,
         form.OrdererPhone ?? string.Empty,
         form.RecipientName,
-        form.RecipientPhone,
+        form.RecipientPhone ?? string.Empty,
         form.PickupAtShop,
         form.ProvinceShipping,
         address.FullAddressSnapshot,
@@ -1013,7 +1179,9 @@ public sealed class OrderService : IOrderService
         address.CommuneCode,
         address.CommuneName,
         address.AddressDetail,
-        address.FullAddressSnapshot);
+        address.FullAddressSnapshot,
+        form.SenderName ?? string.Empty,
+        form.SenderPhone ?? string.Empty);
 
     internal static OrderListItemDto ToListDto(Order order) => new(
         order.Id,
@@ -1120,7 +1288,9 @@ public sealed class OrderService : IOrderService
             order.Images.Where(image => image.OrderItemId == item.Id).OrderBy(image => image.SortOrder)
                 .Select(image => new OrderImageDto(image.Id, image.OrderItemId, image.ImageUrl, image.SortOrder, image.Description)).ToList(),
             item.ProductTypeId,
-            item.ProductTypeName)).ToList(),
+            item.ProductTypeName,
+            item.CategoryId,
+            item.CategoryName)).ToList(),
         order.Images.OrderBy(image => image.SortOrder).Select(image => new OrderImageDto(
             image.Id,
             image.OrderItemId,
@@ -1137,7 +1307,12 @@ public sealed class OrderService : IOrderService
             log.ChangedById,
             log.ChangedByName,
             UtcOffset(log.ChangedAt),
-            log.Note)).ToList());
+            log.Note)).ToList())
+    {
+        CustomerId = order.CustomerId,
+        SenderName = order.SenderName,
+        SenderPhone = order.SenderPhone
+    };
 
     private static IQueryable<Order> ApplyDateRange(
         IQueryable<Order> query,
@@ -1287,7 +1462,8 @@ public sealed class OrderService : IOrderService
         CancellationToken cancellationToken)
     {
         var targetIsCommit = order.OrderStatus == OrderStatus.Created && targetStatus == OrderStatus.Producing;
-        var targetIsRestore = targetStatus == OrderStatus.Cancelled;
+        var targetIsRestore = targetStatus == OrderStatus.Cancelled
+            || (order.OrderStatus == OrderStatus.Producing && targetStatus == OrderStatus.Created);
         if (!targetIsCommit && !targetIsRestore)
             return;
 
@@ -1335,7 +1511,11 @@ public sealed class OrderService : IOrderService
                 null,
                 order.Id,
                 material.Id,
-                delta > 0 ? "Bắt đầu chuẩn bị đơn hàng." : "Hoàn kho do hủy hoặc xóa đơn hàng.",
+                delta > 0
+                    ? "Bắt đầu chuẩn bị đơn hàng."
+                    : targetStatus == OrderStatus.Created
+                        ? "Hoàn kho do trả đơn về trạng thái chờ xác nhận."
+                        : "Hoàn kho do hủy hoặc xóa đơn hàng.",
                 actorId,
                 now));
         }

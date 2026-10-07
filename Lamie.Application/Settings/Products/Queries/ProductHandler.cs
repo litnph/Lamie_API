@@ -39,7 +39,7 @@ namespace Lamie.Application.Settings.Products.Queries
             CancellationToken cancellationToken)
         {
             var product = await _repository.GetByIdAsync(request.Id);
-            if(product == null)
+            if (product == null)
                 throw new NotFoundException("Product", request.Id);
 
             return ProductMapper.ToDetailsDto(product);
@@ -96,6 +96,16 @@ namespace Lamie.Application.Settings.Products.Queries
                         IngredientId = item.IngredientId,
                         BaseQuantity = item.BaseQuantity,
                         Note = item.Note,
+                        SortOrder = item.SortOrder
+                    }).ToList(),
+                InventoryMaterials = product.InventoryMaterials
+                    .OrderBy(item => item.SortOrder)
+                    .ThenBy(item => item.Id)
+                    .Select(item => new ProductInventoryMaterialDto
+                    {
+                        Id = item.Id,
+                        StockUnitId = item.StockUnitId,
+                        Quantity = item.Quantity,
                         SortOrder = item.SortOrder
                     }).ToList(),
             };

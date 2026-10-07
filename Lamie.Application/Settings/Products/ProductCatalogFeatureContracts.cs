@@ -1,10 +1,26 @@
+using Lamie.Domain.Entities;
+
 namespace Lamie.Application.Settings.Products;
 
 public sealed record ProductCatalogSettingsDto(
     decimal PriceDeviationPercent,
-    DateTimeOffset? UpdatedAt);
+    DateTimeOffset? UpdatedAt,
+    string? ShopLogoUrl = null,
+    bool WatermarkEnabled = ProductCatalogSettings.DefaultWatermarkEnabled,
+    ProductWatermarkSource WatermarkSource = ProductCatalogSettings.DefaultWatermarkSource,
+    string? WatermarkImageUrl = null);
 
 public sealed record UpdateProductCatalogSettingsRequest(decimal PriceDeviationPercent);
+
+public sealed record UpdateProductCatalogBrandingRequest(
+    decimal PriceDeviationPercent,
+    bool WatermarkEnabled,
+    ProductWatermarkSource WatermarkSource);
+
+public sealed record ProductCatalogAssetUpload(
+    string FileName,
+    string ContentType,
+    byte[] Bytes);
 
 public sealed record ProductRecognitionUpload(
     string FileName,
@@ -43,6 +59,12 @@ public interface IProductCatalogFeatureService
 
     Task<ProductCatalogSettingsDto> UpdateSettingsAsync(
         UpdateProductCatalogSettingsRequest request,
+        CancellationToken cancellationToken);
+
+    Task<ProductCatalogSettingsDto> UpdateBrandingSettingsAsync(
+        UpdateProductCatalogBrandingRequest request,
+        ProductCatalogAssetUpload? shopLogo,
+        ProductCatalogAssetUpload? watermarkImage,
         CancellationToken cancellationToken);
 
     Task<ProductRecognitionResponseDto> RecognizeAsync(

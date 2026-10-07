@@ -15,19 +15,22 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
     private readonly IProductTypeRepository _productTypeRepository;
     private readonly IReferentialIntegrityService _referentialIntegrity;
     private readonly IProductVisualEmbeddingProvider _visualEmbeddingProvider;
+    private readonly IProductImageWatermarkService _watermarkService;
 
     public UpdateProductHandler(
         IProductRepository repository,
         IFileStorage fileStorage,
         IProductTypeRepository productTypeRepository,
         IReferentialIntegrityService referentialIntegrity,
-        IProductVisualEmbeddingProvider? visualEmbeddingProvider = null)
+        IProductVisualEmbeddingProvider? visualEmbeddingProvider = null,
+        IProductImageWatermarkService? watermarkService = null)
     {
         _repository = repository;
         _fileStorage = fileStorage;
         _productTypeRepository = productTypeRepository;
         _referentialIntegrity = referentialIntegrity;
         _visualEmbeddingProvider = visualEmbeddingProvider ?? new ProductVisualEmbeddingProvider();
+        _watermarkService = watermarkService ?? new SkuProductImageWatermarkService();
     }
 
     public async Task Handle(UpdateProductCommand command, CancellationToken cancellationToken)
@@ -72,7 +75,17 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
                         item.BaseQuantity)).ToArray(),
                 product.Ingredients.Select(item => new ProductIngredientReference(
                     item.IngredientId,
-                    item.BaseQuantity)).ToArray()),
+                    item.BaseQuantity)).ToArray(),
+                command.IsFullReplacement
+                    ? command.InventoryMaterials.Select(item => new ProductInventoryMaterialReference(
+                        item.StockUnitId,
+                        item.Quantity)).ToArray()
+                    : product.InventoryMaterials.Select(item => new ProductInventoryMaterialReference(
+                        item.StockUnitId,
+                        item.Quantity)).ToArray(),
+                product.InventoryMaterials.Select(item => new ProductInventoryMaterialReference(
+                    item.StockUnitId,
+                    item.Quantity)).ToArray()),
             cancellationToken);
 
         product.UpdateDetails(
@@ -102,6 +115,8 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
                 item.BaseQuantity,
                 item.Note,
                 item.SortOrder)));
+            product.ReplaceInventoryMaterials(command.InventoryMaterials.Select(item =>
+                new ProductInventoryMaterialDefinition(item.StockUnitId, item.Quantity, item.SortOrder)));
         }
 
         var obsoleteUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -166,7 +181,7 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
                     cancellationToken);
             }
             await using var source = command.ThumbnailFile.OpenReadStream();
-            await using var stream = await ProductImageWatermarker.ApplyAsync(source, product.Sku, command.ThumbnailFile.ContentType ?? "image/jpeg", cancellationToken);
+            await using var stream = await _watermarkService.ApplyAsync(source, product.Sku, command.ThumbnailFile.ContentType ?? "image/jpeg", cancellationToken);
             var url = await _fileStorage.UploadPublicAsync(
                 stream,
                 objectPath,
@@ -295,7 +310,7 @@ public sealed class UpdateProductHandler : IRequestHandler<UpdateProductCommand>
                 cancellationToken);
         }
         await using var source = file.OpenReadStream();
-        await using var stream = await ProductImageWatermarker.ApplyAsync(source, sku, file.ContentType ?? "image/jpeg", cancellationToken);
+        await using var stream = await _watermarkService.ApplyAsync(source, sku, file.ContentType ?? "image/jpeg", cancellationToken);
         var url = await _fileStorage.UploadPublicAsync(
             stream,
             objectPath,

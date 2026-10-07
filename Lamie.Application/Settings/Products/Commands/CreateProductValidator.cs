@@ -82,6 +82,16 @@ namespace Lamie.Application.Settings.Products.Commands
                 ingredient.RuleFor(x => x.SortOrder).GreaterThanOrEqualTo(0);
             });
 
+            RuleFor(x => x.InventoryMaterials)
+                .Must(items => items.Select(item => item.StockUnitId).Distinct().Count() == items.Count)
+                .WithMessage("Product inventory material stock unit ids must be unique.");
+            RuleForEach(x => x.InventoryMaterials).ChildRules(material =>
+            {
+                material.RuleFor(x => x.StockUnitId).NotEmpty();
+                material.RuleFor(x => x.Quantity).GreaterThan(0).PrecisionScale(18, 6, true);
+                material.RuleFor(x => x.SortOrder).GreaterThanOrEqualTo(0);
+            });
+
             RuleFor(x => x.SimilarProductIds)
                 .Must(ids => ids.All(id => id > 0) && ids.Distinct().Count() == ids.Count)
                 .WithMessage("Similar product ids must be unique positive values.");

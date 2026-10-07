@@ -714,7 +714,9 @@ public sealed class InventoryService : IInventoryService
         if (request.Items.Select(item => item.StockUnitId).Distinct().Count() != request.Items.Count)
             throw Validation(nameof(request.Items), "The same inventory item and size cannot appear twice in an order.");
 
-        await using var transaction = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        await using var ownedTransaction = _dbContext.Database.CurrentTransaction is null
+            ? await _dbContext.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+            : null;
         var order = await _dbContext.Orders.SingleOrDefaultAsync(item => item.Id == orderId, cancellationToken)
             ?? throw new NotFoundException(nameof(Order), orderId);
         if (order.OrderStatus is OrderStatus.Completed or OrderStatus.Cancelled)
@@ -799,11 +801,13 @@ public sealed class InventoryService : IInventoryService
         try
         {
             await _dbContext.SaveChangesAsync(cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            if (ownedTransaction is not null)
+                await ownedTransaction.CommitAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
-            await transaction.RollbackAsync(CancellationToken.None);
+            if (ownedTransaction is not null)
+                await ownedTransaction.RollbackAsync(CancellationToken.None);
             throw new ConflictException("Order materials or inventory changed concurrently. Reload and try again.");
         }
 

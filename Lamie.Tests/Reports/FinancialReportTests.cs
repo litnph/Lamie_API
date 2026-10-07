@@ -137,7 +137,26 @@ public sealed class FinancialReportTests
             var createdOutsidePeriod = new DateTime(2026, 7, 31, 10, 0, 0, DateTimeKind.Utc);
             var deliveryInsidePeriod = new DateTime(2026, 8, 2, 18, 0, 0, DateTimeKind.Utc);
             var deliveryOutsidePeriod = new DateTime(2026, 8, 3, 17, 0, 0, DateTimeKind.Utc);
-            var paidOrder = CreateOrder("REPORT-PAID", 500000, createdOutsidePeriod, deliveryInsidePeriod, 50000);
+            var productCategory = new Category(1);
+            productCategory.AddOrUpdateTranslation("vi-VN", "Hoa bó", null);
+            var productType = new ProductType("FRESH_FLOWER", 1);
+            productType.AddOrUpdateTranslation("vi", "Hoa tươi", null);
+            dbContext.Categories.Add(productCategory);
+            dbContext.ProductTypes.Add(productType);
+            await dbContext.SaveChangesAsync();
+            var product = new Product("REPORT-FLOWER", 500000, 0, productCategory.Id, productType.Id, false);
+            dbContext.Products.Add(product);
+            await dbContext.SaveChangesAsync();
+
+            var paidOrder = CreateOrder(
+                "REPORT-PAID",
+                500000,
+                createdOutsidePeriod,
+                deliveryInsidePeriod,
+                50000,
+                product.Id,
+                productType.Id,
+                "Hoa tươi");
             paidOrder.ChangePaymentStatus(PaymentStatus.Paid, createdOutsidePeriod.AddMinutes(1), null, "report-test");
             var paidOutsidePeriod = CreateOrder("REPORT-OUTSIDE", 300000, deliveryInsidePeriod, deliveryOutsidePeriod);
             paidOutsidePeriod.ChangePaymentStatus(PaymentStatus.Paid, deliveryInsidePeriod.AddMinutes(1), null, "report-test");
@@ -178,6 +197,14 @@ public sealed class FinancialReportTests
             Assert.Equal(350000, Assert.Single(report.Points).Profit);
             Assert.Equal("Vận chuyển", Assert.Single(report.ExpensesByCategory).ExpenseCategoryName);
             Assert.Contains("ngày giao hàng", report.RevenueBasis);
+            var revenueByProductLine = Assert.Single(report.RevenueByProductLine);
+            Assert.Equal(productType.Id, revenueByProductLine.Id);
+            Assert.Equal("Hoa tươi", revenueByProductLine.Name);
+            Assert.Equal(500000, revenueByProductLine.Revenue);
+            var revenueByCategory = Assert.Single(report.RevenueByCategory);
+            Assert.Equal(productCategory.Id, revenueByCategory.Id);
+            Assert.Equal("Hoa bó", revenueByCategory.Name);
+            Assert.Equal(500000, revenueByCategory.Revenue);
 
             var reportIncludingShipping = await service.GetAsync(new FinancialReportQuery
             {
@@ -204,7 +231,10 @@ public sealed class FinancialReportTests
         decimal amount,
         DateTime createdAt,
         DateTime deliveryAt,
-        decimal shippingFee = 0) => new(
+        decimal shippingFee = 0,
+        int? productId = null,
+        int? productTypeId = null,
+        string? productTypeName = null) => new(
         code,
         Channel.AdminId,
         null,
@@ -226,7 +256,7 @@ public sealed class FinancialReportTests
             null,
             null,
             null),
-        [new OrderItemSnapshot(null, null, "Hoa theo yêu cầu", null, amount, 1)],
+        [new OrderItemSnapshot(productId, null, "Hoa theo yêu cầu", null, amount, 1, ProductTypeId: productTypeId, ProductTypeName: productTypeName)],
         createdAt,
         null,
         "report-test");

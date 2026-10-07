@@ -24,6 +24,7 @@ public sealed class ProductCatalogFeatureService : IProductCatalogFeatureService
     private readonly TimeProvider _timeProvider;
     private readonly ProductRecognitionOptions _options;
     private readonly ILogger<ProductCatalogFeatureService> _logger;
+    private readonly IFileStorage? _fileStorage;
 
     public ProductCatalogFeatureService(
         AppDbContext dbContext,
@@ -32,7 +33,8 @@ public sealed class ProductCatalogFeatureService : IProductCatalogFeatureService
         IAccessAuditWriter auditWriter,
         TimeProvider timeProvider,
         IOptions<ProductRecognitionOptions> options,
-        ILogger<ProductCatalogFeatureService> logger)
+        ILogger<ProductCatalogFeatureService> logger,
+        IFileStorage? fileStorage = null)
     {
         _dbContext = dbContext;
         _fileReader = fileReader;
@@ -41,6 +43,7 @@ public sealed class ProductCatalogFeatureService : IProductCatalogFeatureService
         _timeProvider = timeProvider;
         _options = options.Value;
         _logger = logger;
+        _fileStorage = fileStorage;
     }
 
     public async Task<ProductCatalogSettingsDto> GetSettingsAsync(
@@ -94,6 +97,110 @@ public sealed class ProductCatalogFeatureService : IProductCatalogFeatureService
             after);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return after;
+    }
+
+    public async Task<ProductCatalogSettingsDto> UpdateBrandingSettingsAsync(
+        UpdateProductCatalogBrandingRequest request,
+        ProductCatalogAssetUpload? shopLogo,
+        ProductCatalogAssetUpload? watermarkImage,
+        CancellationToken cancellationToken)
+    {
+        if (request.PriceDeviationPercent is < 0 or > ProductCatalogSettings.MaximumPriceDeviationPercent)
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["priceDeviationPercent"] = ["Price deviation percent must be between 0 and 100."]
+            });
+        if (!Enum.IsDefined(request.WatermarkSource))
+            throw new ValidationException(new Dictionary<string, string[]>
+            {
+                ["watermarkSource"] = ["Watermark source is invalid."]
+            });
+        if ((shopLogo is not null || watermarkImage is not null) && _fileStorage is null)
+            throw new InvalidOperationException("Public file storage is not configured.");
+
+        var now = _timeProvider.GetUtcNow().UtcDateTime;
+        var setting = await _dbContext.ProductCatalogSettings.SingleOrDefaultAsync(
+            item => item.Id == ProductCatalogSettings.SingletonId,
+            cancellationToken);
+        if (setting is null)
+        {
+            setting = new ProductCatalogSettings(ProductCatalogSettings.DefaultPriceDeviationPercent, now);
+            _dbContext.ProductCatalogSettings.Add(setting);
+        }
+
+        var previousLogoUrl = setting.ShopLogoUrl;
+        var previousWatermarkUrl = setting.WatermarkImageUrl;
+        var logoUrl = previousLogoUrl;
+        var watermarkUrl = previousWatermarkUrl;
+        var uploadedUrls = new List<string>();
+        try
+        {
+            if (shopLogo is not null)
+            {
+                logoUrl = await UploadAssetAsync(shopLogo, "logo", uploadedUrls, cancellationToken);
+            }
+            if (watermarkImage is not null)
+            {
+                watermarkUrl = await UploadAssetAsync(watermarkImage, "watermark", uploadedUrls, cancellationToken);
+            }
+
+            var before = ToSettingsDto(setting);
+            setting.UpdateBranding(
+                request.PriceDeviationPercent,
+                request.WatermarkEnabled,
+                request.WatermarkSource,
+                logoUrl,
+                watermarkUrl,
+                now);
+            var after = ToSettingsDto(setting);
+            _auditWriter.Record(
+                "product-catalog.branding.update",
+                nameof(ProductCatalogSettings),
+                ProductCatalogSettings.SingletonId.ToString(),
+                before,
+                after);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            if (!string.Equals(previousLogoUrl, logoUrl, StringComparison.OrdinalIgnoreCase))
+                await DeleteAssetBestEffortAsync(previousLogoUrl);
+            if (!string.Equals(previousWatermarkUrl, watermarkUrl, StringComparison.OrdinalIgnoreCase))
+                await DeleteAssetBestEffortAsync(previousWatermarkUrl);
+            return after;
+        }
+        catch
+        {
+            foreach (var url in uploadedUrls)
+                await DeleteAssetBestEffortAsync(url);
+            throw;
+        }
+    }
+
+    private async Task<string> UploadAssetAsync(
+        ProductCatalogAssetUpload upload,
+        string assetName,
+        ICollection<string> uploadedUrls,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(Path.GetFileName(upload.FileName)).ToLowerInvariant();
+        var objectPath = $"shop/{assetName}-{Guid.NewGuid():N}{extension}";
+        await using var source = new MemoryStream(upload.Bytes, writable: false);
+        var url = await _fileStorage!.UploadPublicAsync(source, objectPath, upload.ContentType, cancellationToken);
+        uploadedUrls.Add(url);
+        return url;
+    }
+
+    private async Task DeleteAssetBestEffortAsync(string? url)
+    {
+        if (_fileStorage is null || string.IsNullOrWhiteSpace(url))
+            return;
+        try
+        {
+            await _fileStorage.DeleteAsync(url, CancellationToken.None);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Could not delete replaced product-catalog asset {AssetUrl}.", url);
+        }
     }
 
     public async Task<ProductRecognitionResponseDto> RecognizeAsync(
@@ -344,5 +451,9 @@ public sealed class ProductCatalogFeatureService : IProductCatalogFeatureService
     private static ProductCatalogSettingsDto ToSettingsDto(ProductCatalogSettings setting) =>
         new(
             setting.PriceDeviationPercent,
-            new DateTimeOffset(DateTime.SpecifyKind(setting.UpdatedAt, DateTimeKind.Utc)));
+            new DateTimeOffset(DateTime.SpecifyKind(setting.UpdatedAt, DateTimeKind.Utc)),
+            setting.ShopLogoUrl,
+            setting.WatermarkEnabled,
+            setting.WatermarkSource,
+            setting.WatermarkImageUrl);
 }

@@ -35,6 +35,11 @@ public sealed record FinancialReportExpenseCategoryDto(
     decimal TotalAmount,
     int ExpenseCount);
 
+public sealed record ProductRevenueBreakdownDto(
+    int? Id,
+    string Name,
+    decimal Revenue);
+
 public sealed record FinancialReportDto(
     FinancialReportPeriodDto Period,
     DateTimeOffset GeneratedAt,
@@ -52,6 +57,8 @@ public sealed record FinancialReportDto(
     public decimal ProductRevenue { get; init; }
     public decimal ShippingFee { get; init; }
     public bool IncludeShippingFeeInRevenue { get; init; }
+    public IReadOnlyList<ProductRevenueBreakdownDto> RevenueByProductLine { get; init; } = [];
+    public IReadOnlyList<ProductRevenueBreakdownDto> RevenueByCategory { get; init; } = [];
 }
 
 public sealed record ReportFileDto(

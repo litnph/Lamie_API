@@ -2,6 +2,7 @@ using Lamie.API.Services;
 using Lamie.Application.Common.Uploads;
 using Lamie.Application.Identity;
 using Lamie.Application.Settings.Products;
+using Lamie.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -25,11 +26,43 @@ public sealed class ProductCatalogController : ControllerBase
         _service.GetSettingsAsync(cancellationToken);
 
     [HttpPut("settings")]
+    [Consumes("application/json")]
+    [ApiExplorerSettings(IgnoreApi = true)]
     [Authorize(Policy = PermissionNames.ProductsManage)]
     public Task<ProductCatalogSettingsDto> UpdateSettings(
         UpdateProductCatalogSettingsRequest request,
         CancellationToken cancellationToken) =>
         _service.UpdateSettingsAsync(request, cancellationToken);
+
+    [HttpPut("settings")]
+    [Consumes("multipart/form-data")]
+    [Authorize(Policy = PermissionNames.ProductsManage)]
+    [RequestSizeLimit(ImageUploadPolicy.MaximumFileBytes * 2 + 1024 * 1024)]
+    [RequestFormLimits(MultipartBodyLengthLimit = ImageUploadPolicy.MaximumFileBytes * 2 + 1024 * 1024)]
+    public async Task<ActionResult<ProductCatalogSettingsDto>> UpdateBrandingSettings(
+        [FromForm] UpdateProductCatalogSettingsForm form,
+        CancellationToken cancellationToken)
+    {
+        var files = new[] { form.ShopLogoFile, form.WatermarkImageFile };
+        foreach (var file in files)
+        {
+            if (!ImageUploadPolicy.HasAllowedMetadata(file)
+                || !await ImageUploadPolicy.HasValidSignatureAsync(file, cancellationToken))
+            {
+                return InvalidImage("Ảnh không hợp lệ. Chỉ dùng JPG, PNG, WebP hoặc GIF không quá 10 MB.");
+            }
+        }
+
+        var response = await _service.UpdateBrandingSettingsAsync(
+            new UpdateProductCatalogBrandingRequest(
+                form.PriceDeviationPercent,
+                form.WatermarkEnabled,
+                form.WatermarkSource),
+            await ReadUploadAsync(form.ShopLogoFile, cancellationToken),
+            await ReadUploadAsync(form.WatermarkImageFile, cancellationToken),
+            cancellationToken);
+        return Ok(response);
+    }
 
     [HttpGet("recognition/status")]
     public Task<ProductRecognitionIndexStatusDto> RecognitionStatus(
@@ -81,9 +114,33 @@ public sealed class ProductCatalogController : ControllerBase
         message = "Validation failed",
         errors = new Dictionary<string, string[]> { ["image"] = [message] }
     });
+
+    private static async Task<ProductCatalogAssetUpload?> ReadUploadAsync(
+        IFormFile? file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return null;
+        await using var input = file.OpenReadStream();
+        await using var buffer = new MemoryStream();
+        await input.CopyToAsync(buffer, cancellationToken);
+        return new ProductCatalogAssetUpload(
+            Path.GetFileName(file.FileName),
+            file.ContentType,
+            buffer.ToArray());
+    }
 }
 
 public sealed class ProductRecognitionForm
 {
     public IFormFile? Image { get; init; }
+}
+
+public sealed class UpdateProductCatalogSettingsForm
+{
+    public decimal PriceDeviationPercent { get; init; }
+    public bool WatermarkEnabled { get; init; }
+    public ProductWatermarkSource WatermarkSource { get; init; } = ProductCatalogSettings.DefaultWatermarkSource;
+    public IFormFile? ShopLogoFile { get; init; }
+    public IFormFile? WatermarkImageFile { get; init; }
 }

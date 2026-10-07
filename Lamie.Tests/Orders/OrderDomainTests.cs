@@ -80,6 +80,50 @@ public sealed class OrderDomainTests
     }
 
     [Fact]
+    public void OrderCanReturnThroughPreviousProcessingStatuses()
+    {
+        var order = CreateOrder();
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(2), null, "tester");
+        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(3), null, "tester");
+
+        order.ReturnToPreviousStatus(true, Baseline.AddMinutes(4), null, "tester");
+        Assert.Equal(OrderStatus.Shipping, order.OrderStatus);
+        Assert.Null(order.CompletedAt);
+        Assert.True(order.InventoryReserved);
+
+        order.ReturnToPreviousStatus(true, Baseline.AddMinutes(5), null, "tester");
+        Assert.Equal(OrderStatus.Producing, order.OrderStatus);
+        Assert.True(order.InventoryReserved);
+
+        order.ReturnToPreviousStatus(false, Baseline.AddMinutes(6), null, "tester");
+        Assert.Equal(OrderStatus.Created, order.OrderStatus);
+        Assert.False(order.InventoryReserved);
+        Assert.Contains(order.ChangeLogs, log => log.ChangeType == "StatusReverted");
+        Assert.Throws<DomainException>(() =>
+            order.ReturnToPreviousStatus(false, Baseline.AddMinutes(7), null, "tester"));
+    }
+
+    [Fact]
+    public void ActualShippingFeeCanBeChangedOnlyBeforeCompletion()
+    {
+        var order = CreateOrder();
+
+        order.UpdateShippingFeeActual(22.125m, Baseline.AddMinutes(1), null, "tester");
+        Assert.Equal(22.13m, order.ShippingFeeActual);
+
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(2), null, "tester");
+        order.UpdateShippingFeeActual(30m, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(4), null, "tester");
+        order.UpdateShippingFeeActual(null, Baseline.AddMinutes(5), null, "tester");
+        Assert.Null(order.ShippingFeeActual);
+
+        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(6), null, "tester");
+        Assert.Throws<DomainException>(() =>
+            order.UpdateShippingFeeActual(40m, Baseline.AddMinutes(7), null, "tester"));
+    }
+
+    [Fact]
     public void CancellingReservedOrderMarksInventoryForRestore()
     {
         var order = CreateOrder();
@@ -427,7 +471,12 @@ public sealed class OrderDomainTests
 
         var optionalContact = CreateDetails() with
         {
+            OrdererName = string.Empty,
             OrdererPhone = string.Empty,
+            RecipientName = string.Empty,
+            RecipientPhone = string.Empty,
+            SenderName = "Người gửi",
+            SenderPhone = string.Empty,
             DeliveryAddress = null,
             DeliveryToUtc = Baseline.AddDays(1).AddHours(2)
         };
@@ -442,6 +491,10 @@ public sealed class OrderDomainTests
             "tester");
 
         Assert.Empty(optionalContactOrder.OrdererPhone);
+        Assert.Empty(optionalContactOrder.OrdererName);
+        Assert.Empty(optionalContactOrder.RecipientName);
+        Assert.Empty(optionalContactOrder.RecipientPhone);
+        Assert.Equal("Người gửi", optionalContactOrder.SenderName);
         Assert.Null(optionalContactOrder.DeliveryAddress);
         Assert.Equal(optionalContact.DeliveryToUtc, optionalContactOrder.DeliveryTo);
 

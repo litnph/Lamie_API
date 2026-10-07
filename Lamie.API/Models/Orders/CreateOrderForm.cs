@@ -1,4 +1,5 @@
 using Lamie.Application.Orders;
+using Lamie.Application.Inventory;
 using Lamie.Domain.Entities;
 
 namespace Lamie.API.Models.Orders;
@@ -8,9 +9,13 @@ public sealed class CreateOrderForm
     public string? ClientDraftId { get; init; }
     public string OrdererName { get; init; } = string.Empty;
     public string? OrdererPhone { get; init; }
+    public Guid? CustomerId { get; init; }
+    public bool? CreateMember { get; init; }
     public Guid? ChannelId { get; init; }
     public string RecipientName { get; init; } = string.Empty;
-    public string RecipientPhone { get; init; } = string.Empty;
+    public string? RecipientPhone { get; init; }
+    public string? SenderName { get; init; }
+    public string? SenderPhone { get; init; }
     public bool PickupAtShop { get; init; }
     public bool ProvinceShipping { get; init; }
     public string? DeliveryAddress { get; init; }
@@ -31,10 +36,13 @@ public sealed class CreateOrderForm
     public decimal? DepositAmount { get; init; }
     public bool IsPaid { get; init; }
     public decimal ShippingFee { get; init; }
+    public decimal? ShippingFeeActual { get; init; }
     public string? Description { get; init; }
     public string? ContentNote { get; init; }
     public List<OrderLineRequest> Items { get; init; } = [];
     public List<CreateOrderImageForm> Images { get; init; } = [];
+    public bool MaterialsSpecified { get; init; }
+    public List<SaveOrderMaterialItem> Materials { get; init; } = [];
 }
 
 public sealed class BatchCreateOrdersForm
@@ -55,9 +63,13 @@ public sealed class UpdateOrderForm
     public string? RowVersion { get; init; }
     public string OrdererName { get; init; } = string.Empty;
     public string? OrdererPhone { get; init; }
+    public Guid? CustomerId { get; init; }
+    public bool? CreateMember { get; init; }
     public Guid ChannelId { get; init; }
     public string RecipientName { get; init; } = string.Empty;
-    public string RecipientPhone { get; init; } = string.Empty;
+    public string? RecipientPhone { get; init; }
+    public string? SenderName { get; init; }
+    public string? SenderPhone { get; init; }
     public bool PickupAtShop { get; init; }
     public bool ProvinceShipping { get; init; }
     public string? DeliveryAddress { get; init; }
@@ -83,4 +95,6 @@ public sealed class UpdateOrderForm
     public string? ContentNote { get; init; }
     public List<OrderLineRequest> Items { get; init; } = [];
     public List<CreateOrderImageForm> Images { get; init; } = [];
+    public bool MaterialsSpecified { get; init; }
+    public List<SaveOrderMaterialItem> Materials { get; init; } = [];
 }

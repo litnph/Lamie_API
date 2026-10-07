@@ -210,16 +210,22 @@ public sealed class IngredientPlanningTests
         var model = dbContext.GetService<IDesignTimeModel>().Model;
 
         var recipe = model.FindEntityType(typeof(ProductIngredient))!;
+        var inventoryMaterial = model.FindEntityType(typeof(ProductInventoryMaterial))!;
         var snapshot = model.FindEntityType(typeof(OrderItemIngredientSnapshot))!;
         var item = model.FindEntityType(typeof(OrderItem))!;
         Assert.Equal(18, recipe.FindProperty(nameof(ProductIngredient.BaseQuantity))!.GetPrecision());
         Assert.Equal(6, recipe.FindProperty(nameof(ProductIngredient.BaseQuantity))!.GetScale());
+        Assert.Equal(18, inventoryMaterial.FindProperty(nameof(ProductInventoryMaterial.Quantity))!.GetPrecision());
+        Assert.Equal(6, inventoryMaterial.FindProperty(nameof(ProductInventoryMaterial.Quantity))!.GetScale());
         Assert.Equal(18, snapshot.FindProperty(nameof(OrderItemIngredientSnapshot.TotalBaseQuantity))!.GetPrecision());
         Assert.Equal(6, snapshot.FindProperty(nameof(OrderItemIngredientSnapshot.TotalBaseQuantity))!.GetScale());
         Assert.True(item.FindProperty(nameof(OrderItem.IngredientSnapshotCapturedAtUtc))!.IsNullable);
         Assert.Contains(recipe.GetIndexes(), index => index.IsUnique
             && index.Properties.Select(property => property.Name)
                 .SequenceEqual([nameof(ProductIngredient.ProductId), nameof(ProductIngredient.IngredientId)]));
+        Assert.Contains(inventoryMaterial.GetIndexes(), index => index.IsUnique
+            && index.Properties.Select(property => property.Name)
+                .SequenceEqual([nameof(ProductInventoryMaterial.ProductId), nameof(ProductInventoryMaterial.StockUnitId)]));
     }
 
     [Fact]
