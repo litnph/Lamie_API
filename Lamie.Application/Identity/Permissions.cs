@@ -10,6 +10,7 @@ public static class PermissionNames
     public const string OrdersManage = "orders.manage";
     public const string OrdersCancel = "orders.cancel";
     public const string OrdersReverseStatus = "orders.reverse-status";
+    public const string OrdersChangeStatus = "orders.change-status";
     public const string CustomersView = "customers.view";
     public const string CustomersManage = "customers.manage";
     public const string ChannelsView = "channels.view";
@@ -35,6 +36,7 @@ public static class PermissionNames
     public const string InventoryManage = "inventory.manage";
     public const string TasksView = "tasks.view";
     public const string CatalogSettingsView = "catalog-settings.view";
+    public const string FinancePeriodsReopen = "finance-periods.reopen";
 
     public static readonly IReadOnlyList<PermissionDescriptor> Descriptors =
     [
@@ -69,7 +71,9 @@ public static class PermissionNames
         new(TasksView, "Xem Việc cần làm", "Vận hành", "Mở không gian Việc cần làm; dữ liệu từng tab vẫn yêu cầu quyền nghiệp vụ tương ứng."),
         new(CatalogSettingsView, "Xem Cài đặt danh mục", "Cấu hình", "Mở không gian Cài đặt danh mục; từng nhóm dữ liệu vẫn yêu cầu quyền riêng."),
         // Keep new descriptors appended so deterministic permission ids remain stable.
-        new(OrdersReverseStatus, "Trả lại trạng thái đơn hàng", "Đơn hàng", "Đưa đơn hàng về bước xử lý liền trước.")
+        new(OrdersReverseStatus, "Trả lại trạng thái đơn hàng", "Đơn hàng", "Đưa đơn hàng về bước xử lý liền trước."),
+        new(FinancePeriodsReopen, "Mở lại kỳ tài chính", "Tài chính", "Mở lại kỳ đã chốt với lý do và lịch sử kiểm toán."),
+        new(OrdersChangeStatus, "Chuyển trạng thái đơn hàng", "Đơn hàng", "Chuyển tự do giữa các bước vận hành cho phép; không được gán hoàn tất thủ công.")
     ];
 
     public static readonly IReadOnlyCollection<string> All = Descriptors.Select(item => item.Code).ToArray();

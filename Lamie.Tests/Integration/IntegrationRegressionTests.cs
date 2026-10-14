@@ -91,11 +91,13 @@ public sealed class IntegrationRegressionTests
 
         var migrations = dbContext.Database.GetMigrations().ToArray();
 
-        Assert.Equal(34, migrations.Length);
+        Assert.Equal(41, migrations.Length);
         Assert.Equal(migrations.OrderBy(value => value, StringComparer.Ordinal), migrations);
         Assert.Contains(migrations, value => value.EndsWith("_AddIdentity", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddChannels", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderDomain", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddOrderStatusChangePermission", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_ReconcileDeliveredPaidOrders", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddDashboardQueryIndex", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddProductTypes", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderImageItemLink", StringComparison.Ordinal));
@@ -108,6 +110,7 @@ public sealed class IntegrationRegressionTests
         Assert.Contains(migrations, value => value.EndsWith("_AddNavigationBackend", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_SeedDefaultAdminNavigation", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderItemCardAndBanner", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddOrderWorkflowV4", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddAdministrativeAddressData", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddIngredientPlanningAndContentPublishing", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderItemProductTypeSnapshot", StringComparison.Ordinal));
@@ -121,7 +124,11 @@ public sealed class IntegrationRegressionTests
         Assert.Contains(migrations, value => value.EndsWith("_AddProductInventoryMaterialsAndBrandingSettings", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_ReorganizeAdminSidebar", StringComparison.Ordinal));
         Assert.Contains(migrations, value => value.EndsWith("_AddOrderStatusReversalPermission", StringComparison.Ordinal));
-        Assert.EndsWith("_MoveExpenseCategoriesToCatalogSettings", migrations[^1], StringComparison.Ordinal);
+        Assert.Contains(migrations, value => value.EndsWith("_MoveExpenseCategoriesToCatalogSettings", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddV2FinancialLedgers", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddRecognizedRevenueRefunds", StringComparison.Ordinal));
+        Assert.Contains(migrations, value => value.EndsWith("_AddOrderWorkflowV4", StringComparison.Ordinal));
+        Assert.EndsWith("_ReconcileDeliveredPaidOrders", migrations[^1], StringComparison.Ordinal);
     }
 
     [Fact]

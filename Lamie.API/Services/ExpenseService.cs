@@ -1,5 +1,6 @@
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Expenses;
+using Lamie.Application.Finance;
 using Lamie.Domain.Entities;
 using Lamie.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -12,11 +13,13 @@ public sealed class ExpenseService : IExpenseService
 
     private readonly AppDbContext _dbContext;
     private readonly TimeProvider _timeProvider;
+    private readonly IFinancePeriodGuard? _financePeriodGuard;
 
-    public ExpenseService(AppDbContext dbContext, TimeProvider timeProvider)
+    public ExpenseService(AppDbContext dbContext, TimeProvider timeProvider, IFinancePeriodGuard? financePeriodGuard = null)
     {
         _dbContext = dbContext;
         _timeProvider = timeProvider;
+        _financePeriodGuard = financePeriodGuard;
     }
 
     public async Task<PagedExpensesDto> ListAsync(
@@ -57,9 +60,12 @@ public sealed class ExpenseService : IExpenseService
             .Skip((page - 1) * query.PageSize)
             .Take(query.PageSize)
             .ToListAsync(cancellationToken);
+        var ids = rows.Select(row => row.Expense.Id).ToList();
+        var payments = await _dbContext.ExpensePayments.AsNoTracking()
+            .Where(payment => ids.Contains(payment.ExpenseId)).OrderBy(payment => payment.PaidAt).ToListAsync(cancellationToken);
 
         return new PagedExpensesDto(
-            rows.Select(row => ToDto(row.Expense, row.CategoryName)).ToList(),
+            rows.Select(row => ToDto(row.Expense, row.CategoryName, payments.Where(payment => payment.ExpenseId == row.Expense.Id).ToList())).ToList(),
             totalCount,
             page,
             query.PageSize,
@@ -79,7 +85,9 @@ public sealed class ExpenseService : IExpenseService
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new NotFoundException(nameof(Expense), id);
 
-        return ToDto(row.Expense, row.CategoryName);
+        var payments = await _dbContext.ExpensePayments.AsNoTracking()
+            .Where(payment => payment.ExpenseId == id).OrderBy(payment => payment.PaidAt).ToListAsync(cancellationToken);
+        return ToDto(row.Expense, row.CategoryName, payments);
     }
 
     public async Task<Guid> CreateAsync(
@@ -87,14 +95,38 @@ public sealed class ExpenseService : IExpenseService
         CancellationToken cancellationToken)
     {
         await EnsureCategoryCanBeUsedAsync(request.ExpenseCategoryId, null, cancellationToken);
+        var now = UtcNow();
         var expense = new Expense(
             request.ExpenseCategoryId,
             request.ExpenseDate,
             request.Amount,
             request.Description,
             request.Notes,
-            UtcNow());
+            now,
+            paidAtUtc: request.PaidAt?.UtcDateTime,
+            paymentMethod: request.PaymentMethod,
+            vendor: request.Vendor,
+            paymentIdempotencyKey: request.PaymentIdempotencyKey);
+        ExpensePayment? initialPayment = null;
+        if (request.PaidAt.HasValue && request.PaymentMethod.HasValue)
+        {
+            initialPayment = new ExpensePayment(expense.Id, request.Amount, request.PaidAt.Value.UtcDateTime,
+                request.PaymentMethod.Value, request.PaymentIdempotencyKey ?? $"expense-initial-{expense.Id:N}",
+                "Thanh toán khi tạo chi phí", now, null);
+        }
+        if (_financePeriodGuard is not null)
+        {
+            await _financePeriodGuard.InvalidateAsync(request.ExpenseDate, "Thêm chi phí vận hành", cancellationToken);
+            if (initialPayment is not null)
+            {
+                var paymentDate = LocalDate(initialPayment.PaidAt);
+                if (paymentDate != request.ExpenseDate)
+                    await _financePeriodGuard.InvalidateAsync(paymentDate, "Thanh toán chi phí vận hành", cancellationToken);
+            }
+        }
         _dbContext.Expenses.Add(expense);
+        if (initialPayment is not null)
+            _dbContext.ExpensePayments.Add(initialPayment);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return expense.Id;
     }
@@ -110,6 +142,26 @@ public sealed class ExpenseService : IExpenseService
             request.ExpenseCategoryId,
             expense.ExpenseCategoryId,
             cancellationToken);
+        _ = new Expense(request.ExpenseCategoryId, request.ExpenseDate, request.Amount, request.Description,
+            request.Notes, UtcNow(), expense.StockReceiptId, request.PaidAt?.UtcDateTime,
+            request.PaymentMethod, request.Vendor, request.PaymentIdempotencyKey);
+        var ledgerPayments = await _dbContext.ExpensePayments.AsNoTracking()
+            .Where(payment => payment.ExpenseId == id && payment.Status == PaymentTransactionStatus.Succeeded)
+            .ToListAsync(cancellationToken);
+        var paidAmount = ledgerPayments.Sum(payment => payment.Amount);
+        if (paidAmount > request.Amount)
+            throw new ConflictException("Số tiền chi phí sau khi sửa không thể nhỏ hơn tổng đã thanh toán.");
+        if (ledgerPayments.Count > 0
+            && (request.PaidAt?.UtcDateTime != expense.PaidAt || request.PaymentMethod != expense.PaymentMethod))
+            throw new ConflictException("Lịch sử thanh toán không thể sửa trực tiếp; hãy ghi giao dịch điều chỉnh riêng.");
+        if (ledgerPayments.Count == 0 && expense.PaidAt.HasValue && request.Amount != expense.Amount)
+            throw new ConflictException("Chi phí cũ đã thanh toán không thể đổi số tiền; hãy bổ sung lịch sử giao dịch trước.");
+        if (_financePeriodGuard is not null)
+        {
+            await _financePeriodGuard.InvalidateAsync(expense.ExpenseDate, "Sửa chi phí vận hành", cancellationToken);
+            if (expense.ExpenseDate != request.ExpenseDate)
+                await _financePeriodGuard.InvalidateAsync(request.ExpenseDate, "Chuyển kỳ chi phí vận hành", cancellationToken);
+        }
 
         expense.Update(
             request.ExpenseCategoryId,
@@ -117,7 +169,11 @@ public sealed class ExpenseService : IExpenseService
             request.Amount,
             request.Description,
             request.Notes,
-            UtcNow());
+            UtcNow(),
+            request.PaidAt?.UtcDateTime,
+            request.PaymentMethod,
+            request.Vendor,
+            request.PaymentIdempotencyKey);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
@@ -127,6 +183,11 @@ public sealed class ExpenseService : IExpenseService
             ?? throw new NotFoundException(nameof(Expense), id);
         if (expense.StockReceiptId.HasValue)
             throw new ConflictException("Chi phí được tạo từ phiếu nhập kho không thể xóa riêng. Hãy giữ chứng từ để bảo toàn lịch sử đối soát.");
+        if (expense.PaidAt.HasValue || await _dbContext.ExpensePayments.AnyAsync(
+                payment => payment.ExpenseId == id, cancellationToken))
+            throw new ConflictException("Chi phí đã có giao dịch thanh toán không thể xóa; hãy dùng giao dịch điều chỉnh để giữ lịch sử.");
+        if (_financePeriodGuard is not null)
+            await _financePeriodGuard.InvalidateAsync(expense.ExpenseDate, "Xóa chi phí vận hành", cancellationToken);
         _dbContext.Expenses.Remove(expense);
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
@@ -243,18 +304,26 @@ public sealed class ExpenseService : IExpenseService
 
     private DateTime UtcNow() => _timeProvider.GetUtcNow().UtcDateTime;
 
-    private static ExpenseDto ToDto(Expense expense, string categoryName) => new(
-        expense.Id,
-        expense.ExpenseCategoryId,
-        categoryName,
-        expense.ExpenseDate,
-        expense.Amount,
-        expense.Description,
-        expense.Notes,
-        ToUtcOffset(expense.CreatedAt),
-        ToUtcOffset(expense.UpdatedAt),
-        expense.StockReceiptId);
+    private static DateOnly LocalDate(DateTime utc) =>
+        DateOnly.FromDateTime(utc.Add(BusinessOffset));
+
+    private static ExpenseDto ToDto(Expense expense, string categoryName, IReadOnlyList<ExpensePayment>? payments = null)
+    {
+        var ledgerPaid = payments?.Where(payment => payment.Status == PaymentTransactionStatus.Succeeded)
+            .Sum(payment => payment.Amount) ?? 0;
+        var paid = ledgerPaid > 0 ? ledgerPaid : expense.PaidAt.HasValue ? expense.Amount : 0;
+        return new ExpenseDto(
+            expense.Id, expense.ExpenseCategoryId, categoryName, expense.ExpenseDate, expense.Amount,
+            expense.Description, expense.Notes, ToUtcOffset(expense.CreatedAt), ToUtcOffset(expense.UpdatedAt),
+            expense.StockReceiptId, ToUtcOffset(expense.PaidAt), expense.PaymentMethod, expense.Vendor,
+            expense.PaymentHistoryIncomplete, paid, Math.Max(0, expense.Amount - paid),
+            payments?.Select(payment => new ExpensePaymentDto(payment.Id, payment.Amount, ToUtcOffset(payment.PaidAt),
+                payment.Method, payment.Status, payment.Note)).ToList() ?? []);
+    }
 
     private static DateTimeOffset ToUtcOffset(DateTime value) =>
         new(DateTime.SpecifyKind(value, DateTimeKind.Utc));
+
+    private static DateTimeOffset? ToUtcOffset(DateTime? value) =>
+        value.HasValue ? ToUtcOffset(value.Value) : null;
 }

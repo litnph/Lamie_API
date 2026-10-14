@@ -1185,6 +1185,25 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(2000)")
                         .HasColumnName("notes");
 
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("paid_at");
+
+                    b.Property<bool>("PaymentHistoryIncomplete")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("payment_history_incomplete");
+
+                    b.Property<string>("PaymentIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("payment_idempotency_key");
+
+                    b.Property<int?>("PaymentMethod")
+                        .HasColumnType("int")
+                        .HasColumnName("payment_method");
+
                     b.Property<Guid?>("StockReceiptId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("stock_receipt_id");
@@ -1193,11 +1212,24 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("datetime2")
                         .HasColumnName("updated_at");
 
+                    b.Property<string>("Vendor")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("vendor");
+
                     b.HasKey("Id")
                         .HasName("pk_fin_expenses");
 
                     b.HasIndex("ExpenseCategoryId")
                         .HasDatabaseName("ix_fin_expenses_expense_category_id");
+
+                    b.HasIndex("PaidAt")
+                        .HasDatabaseName("ix_fin_expenses_paid_at");
+
+                    b.HasIndex("PaymentIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_expenses_payment_idempotency_key")
+                        .HasFilter("[payment_idempotency_key] IS NOT NULL");
 
                     b.HasIndex("StockReceiptId")
                         .IsUnique()
@@ -1261,6 +1293,187 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_fin_expense_categories_sort_order_name");
 
                     b.ToTable("fin_expense_categories", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.ExpensePayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<Guid>("ExpenseId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("expense_id");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int")
+                        .HasColumnName("method");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<DateTime>("PaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("paid_at");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_expense_payments");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_expense_payments_idempotency_key");
+
+                    b.HasIndex("ExpenseId", "PaidAt")
+                        .HasDatabaseName("ix_fin_expense_payments_expense_id_paid_at");
+
+                    b.ToTable("fin_expense_payments", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.FinancePeriod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime?>("ClosedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("closed_at");
+
+                    b.Property<Guid?>("ClosedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("closed_by_id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<long>("DataVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("data_version");
+
+                    b.Property<long?>("ExpensesConfirmedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("expenses_confirmed_version");
+
+                    b.Property<DateOnly>("From")
+                        .HasColumnType("date")
+                        .HasColumnName("from");
+
+                    b.Property<decimal?>("OpeningCashBalance")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("opening_cash_balance");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion")
+                        .HasColumnName("row_version");
+
+                    b.Property<long?>("ShippingConfirmedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("shipping_confirmed_version");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.Property<long?>("StocktakeConfirmedVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("stocktake_confirmed_version");
+
+                    b.Property<DateOnly>("To")
+                        .HasColumnType("date")
+                        .HasColumnName("to");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_periods");
+
+                    b.HasIndex("From", "To")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_periods_from_to");
+
+                    b.HasIndex("Status", "From", "To")
+                        .HasDatabaseName("ix_fin_periods_status_from_to");
+
+                    b.ToTable("fin_periods", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.FinancePeriodEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("ActorUserId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("actor_user_id");
+
+                    b.Property<long>("DataVersion")
+                        .HasColumnType("bigint")
+                        .HasColumnName("data_version");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int")
+                        .HasColumnName("kind");
+
+                    b.Property<DateTime>("OccurredAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("period_id");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("reason");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_period_events");
+
+                    b.HasIndex("PeriodId", "OccurredAt")
+                        .HasDatabaseName("ix_fin_period_events_period_id_occurred_at");
+
+                    b.ToTable("fin_period_events", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Ingredient", b =>
@@ -1581,6 +1794,252 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.ToTable("sys_languages", (string)null);
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialPurchase", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AttachmentUrl")
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)")
+                        .HasColumnName("attachment_url");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("DocumentReference")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("document_reference");
+
+                    b.Property<int>("DocumentStatus")
+                        .HasColumnType("int")
+                        .HasColumnName("document_status");
+
+                    b.Property<DateOnly?>("InvoiceDate")
+                        .HasColumnType("date")
+                        .HasColumnName("invoice_date");
+
+                    b.Property<string>("Notes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)")
+                        .HasColumnName("notes");
+
+                    b.Property<DateOnly>("PurchaseDate")
+                        .HasColumnType("date")
+                        .HasColumnName("purchase_date");
+
+                    b.Property<DateOnly>("ReceivedDate")
+                        .HasColumnType("date")
+                        .HasColumnName("received_date");
+
+                    b.Property<int>("TaxEligibilityStatus")
+                        .HasColumnType("int")
+                        .HasColumnName("tax_eligibility_status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("VendorAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)")
+                        .HasColumnName("vendor_address");
+
+                    b.Property<string>("VendorName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("vendor_name");
+
+                    b.Property<string>("VendorTaxId")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)")
+                        .HasColumnName("vendor_tax_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_material_purchases");
+
+                    b.HasIndex("ReceivedDate")
+                        .HasDatabaseName("ix_fin_material_purchases_received_date");
+
+                    b.HasIndex("DocumentStatus", "ReceivedDate")
+                        .HasDatabaseName("ix_fin_material_purchases_document_status_received_date");
+
+                    b.ToTable("fin_material_purchases", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialPurchaseLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(300)
+                        .HasColumnType("nvarchar(300)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("Group")
+                        .HasColumnType("int")
+                        .HasColumnName("group");
+
+                    b.Property<Guid>("PurchaseId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchase_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_material_purchase_lines");
+
+                    b.HasIndex("PurchaseId", "Group")
+                        .HasDatabaseName("ix_fin_material_purchase_lines_purchase_id_group");
+
+                    b.ToTable("fin_material_purchase_lines", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialPurchasePayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int")
+                        .HasColumnName("method");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<DateTime>("PaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("paid_at");
+
+                    b.Property<Guid>("PurchaseId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("purchase_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_material_purchase_payments");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_material_purchase_payments_idempotency_key");
+
+                    b.HasIndex("PurchaseId", "PaidAt")
+                        .HasDatabaseName("ix_fin_material_purchase_payments_purchase_id_paid_at");
+
+                    b.ToTable("fin_material_purchase_payments", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialStocktakeLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<decimal>("AdjustmentValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("adjustment_value");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("confirmed_at");
+
+                    b.Property<Guid?>("ConfirmedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("confirmed_by_id");
+
+                    b.Property<decimal>("EndingValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("ending_value");
+
+                    b.Property<int>("Group")
+                        .HasColumnType("int")
+                        .HasColumnName("group");
+
+                    b.Property<bool>("IsEstimated")
+                        .HasColumnType("bit")
+                        .HasColumnName("is_estimated");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<decimal>("OpeningValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("opening_value");
+
+                    b.Property<Guid>("PeriodId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("period_id");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("updated_at");
+
+                    b.Property<decimal>("WasteValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("waste_value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_material_stocktake_lines");
+
+                    b.HasIndex("PeriodId", "Group")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_material_stocktake_lines_period_id_group");
+
+                    b.ToTable("fin_material_stocktake_lines", (string)null);
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.MeasurementUnit", b =>
                 {
                     b.Property<int>("Id")
@@ -1760,9 +2219,27 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("int")
                         .HasColumnName("address_scheme");
 
+                    b.Property<Guid?>("AssigneeId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("assignee_id");
+
+                    b.Property<string>("AssigneeName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)")
+                        .HasColumnName("assignee_name");
+
                     b.Property<DateTime?>("CancelledAt")
                         .HasColumnType("datetime2")
                         .HasColumnName("cancelled_at");
+
+                    b.Property<string>("CancelledReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("cancelled_reason");
+
+                    b.Property<bool>("CardPrepared")
+                        .HasColumnType("bit")
+                        .HasColumnName("card_prepared");
 
                     b.Property<Guid>("ChannelId")
                         .HasColumnType("uniqueidentifier")
@@ -1798,6 +2275,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uniqueidentifier")
                         .HasColumnName("customer_id");
+
+                    b.Property<DateTime?>("DeliveredAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("delivered_at");
 
                     b.Property<string>("DeliveryAddress")
                         .HasMaxLength(1500)
@@ -1837,6 +2318,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(4000)")
                         .HasColumnName("description");
 
+                    b.Property<bool>("DesignConfirmed")
+                        .HasColumnType("bit")
+                        .HasColumnName("design_confirmed");
+
                     b.Property<decimal>("DiscountTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)")
@@ -1857,9 +2342,26 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(1500)")
                         .HasColumnName("full_address_snapshot");
 
+                    b.Property<DateTime?>("HoldAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("hold_at");
+
+                    b.Property<Guid?>("HoldById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("hold_by_id");
+
+                    b.Property<string>("HoldReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("hold_reason");
+
                     b.Property<bool>("InventoryReserved")
                         .HasColumnType("bit")
                         .HasColumnName("inventory_reserved");
+
+                    b.Property<bool>("MaterialsPrepared")
+                        .HasColumnType("bit")
+                        .HasColumnName("materials_prepared");
 
                     b.Property<string>("OrderCode")
                         .IsRequired()
@@ -1883,6 +2385,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("nvarchar(30)")
                         .HasColumnName("orderer_phone");
 
+                    b.Property<DateTime?>("PaidInFullAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("paid_in_full_at");
+
                     b.Property<int>("PaymentStatus")
                         .HasColumnType("int")
                         .HasColumnName("payment_status");
@@ -1890,6 +2396,10 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.Property<bool>("PickupAtShop")
                         .HasColumnType("bit")
                         .HasColumnName("pickup_at_shop");
+
+                    b.Property<DateOnly?>("PreparationDate")
+                        .HasColumnType("date")
+                        .HasColumnName("preparation_date");
 
                     b.Property<string>("ProvinceCode")
                         .HasMaxLength(10)
@@ -1905,14 +2415,16 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("bit")
                         .HasColumnName("province_shipping");
 
+                    b.Property<bool>("QualityChecked")
+                        .HasColumnType("bit")
+                        .HasColumnName("quality_checked");
+
                     b.Property<string>("RecipientName")
-                        .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)")
                         .HasColumnName("recipient_name");
 
                     b.Property<string>("RecipientPhone")
-                        .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)")
                         .HasColumnName("recipient_phone");
@@ -1946,6 +2458,23 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasColumnType("decimal(18,2)")
                         .HasColumnName("shipping_fee_actual");
 
+                    b.Property<DateTime?>("ShippingFeeIncurredAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("shipping_fee_incurred_at");
+
+                    b.Property<DateTime?>("ShippingFeePaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("shipping_fee_paid_at");
+
+                    b.Property<string>("ShippingFeePaymentIdempotencyKey")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("shipping_fee_payment_idempotency_key");
+
+                    b.Property<int?>("ShippingFeePaymentMethod")
+                        .HasColumnType("int")
+                        .HasColumnName("shipping_fee_payment_method");
+
                     b.Property<decimal>("SubTotal")
                         .HasPrecision(18, 2)
                         .HasColumnType("decimal(18,2)")
@@ -1967,15 +2496,38 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_sales_orders");
 
+                    b.HasIndex("CompletedAt")
+                        .HasDatabaseName("ix_sales_orders_completed_at");
+
                     b.HasIndex("CreatedAt")
                         .HasDatabaseName("ix_sales_orders_created_at");
 
                     b.HasIndex("CreatedById")
                         .HasDatabaseName("ix_sales_orders_created_by_id");
 
+                    b.HasIndex("DeliveredAt")
+                        .HasDatabaseName("ix_sales_orders_delivered_at");
+
                     b.HasIndex("OrderCode")
                         .IsUnique()
                         .HasDatabaseName("ix_sales_orders_order_code");
+
+                    b.HasIndex("PaidInFullAt")
+                        .HasDatabaseName("ix_sales_orders_paid_in_full_at");
+
+                    b.HasIndex("PreparationDate")
+                        .HasDatabaseName("ix_sales_orders_preparation_date");
+
+                    b.HasIndex("ShippingFeeIncurredAt")
+                        .HasDatabaseName("ix_sales_orders_shipping_fee_incurred_at");
+
+                    b.HasIndex("ShippingFeePaidAt")
+                        .HasDatabaseName("ix_sales_orders_shipping_fee_paid_at");
+
+                    b.HasIndex("ShippingFeePaymentIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_sales_orders_shipping_fee_payment_idempotency_key")
+                        .HasFilter("[shipping_fee_payment_idempotency_key] IS NOT NULL");
 
                     b.HasIndex("UpdatedById")
                         .HasDatabaseName("ix_sales_orders_updated_by_id");
@@ -2382,6 +2934,92 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasDatabaseName("ix_sales_order_materials_order_id_stock_unit_id");
 
                     b.ToTable("sales_order_materials", (string)null);
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderPayment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("id");
+
+                    b.Property<bool>("AffectsRecognizedRevenue")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false)
+                        .HasColumnName("affects_recognized_revenue");
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("created_by_id");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)")
+                        .HasColumnName("idempotency_key");
+
+                    b.Property<int>("Kind")
+                        .HasColumnType("int")
+                        .HasColumnName("kind");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("int")
+                        .HasColumnName("method");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)")
+                        .HasColumnName("note");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier")
+                        .HasColumnName("order_id");
+
+                    b.Property<DateTime>("PaidAt")
+                        .HasColumnType("datetime2")
+                        .HasColumnName("paid_at");
+
+                    b.Property<decimal>("ProductRevenueAdjustment")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("product_revenue_adjustment");
+
+                    b.Property<decimal>("ShippingRevenueAdjustment")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)")
+                        .HasColumnName("shipping_revenue_adjustment");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int")
+                        .HasColumnName("status");
+
+                    b.HasKey("Id")
+                        .HasName("pk_fin_order_payments");
+
+                    b.HasIndex("CreatedById")
+                        .HasDatabaseName("ix_fin_order_payments_created_by_id");
+
+                    b.HasIndex("IdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_fin_order_payments_idempotency_key");
+
+                    b.HasIndex("OrderId", "PaidAt")
+                        .HasDatabaseName("ix_fin_order_payments_order_id_paid_at");
+
+                    b.HasIndex("PaidAt", "Status")
+                        .HasDatabaseName("ix_fin_order_payments_paid_at_status");
+
+                    b.ToTable("fin_order_payments", (string)null);
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Permission", b =>
@@ -2848,6 +3486,32 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                             IsSystem = true,
                             Name = "Trả lại trạng thái đơn hàng",
                             SortOrder = 310,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000032"),
+                            Code = "finance-periods.reopen",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Mở lại kỳ đã chốt với lý do và lịch sử kiểm toán.",
+                            Group = "Tài chính",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Mở lại kỳ tài chính",
+                            SortOrder = 320,
+                            UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            Id = new Guid("10000000-0000-4000-8000-000000000033"),
+                            Code = "orders.change-status",
+                            CreatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc),
+                            Description = "Chuyển tự do giữa các bước vận hành cho phép; không được gán hoàn tất thủ công.",
+                            Group = "Đơn hàng",
+                            IsActive = true,
+                            IsSystem = true,
+                            Name = "Chuyển trạng thái đơn hàng",
+                            SortOrder = 330,
                             UpdatedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
                         });
                 });
@@ -4049,6 +4713,18 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         },
                         new
                         {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000032"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
+                            RoleId = new Guid("20000000-0000-4000-8000-000000000001"),
+                            PermissionId = new Guid("10000000-0000-4000-8000-000000000033"),
+                            GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
+                        },
+                        new
+                        {
                             RoleId = new Guid("20000000-0000-4000-8000-000000000002"),
                             PermissionId = new Guid("10000000-0000-4000-8000-000000000001"),
                             GrantedAt = new DateTime(2026, 8, 3, 0, 0, 0, 0, DateTimeKind.Utc)
@@ -4869,6 +5545,26 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .HasConstraintName("fk_content_items_content_generations_generation_id");
                 });
 
+            modelBuilder.Entity("Lamie.Domain.Entities.ExpensePayment", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.Expense", null)
+                        .WithMany()
+                        .HasForeignKey("ExpenseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_expense_payments_fin_expenses_expense_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.FinancePeriodEvent", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.FinancePeriod", null)
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_period_events_fin_periods_period_id");
+                });
+
             modelBuilder.Entity("Lamie.Domain.Entities.Ingredient", b =>
                 {
                     b.HasOne("Lamie.Domain.Entities.MeasurementUnit", null)
@@ -4894,6 +5590,36 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_md_ingredient_conversions_md_measurement_units_unit_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialPurchaseLine", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.MaterialPurchase", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_material_purchase_lines_fin_material_purchases_purchase_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialPurchasePayment", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.MaterialPurchase", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_material_purchase_payments_material_purchases_purchase_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.MaterialStocktakeLine", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.FinancePeriod", null)
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_material_stocktake_lines_fin_periods_period_id");
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.OccasionTranslation", b =>
@@ -4997,6 +5723,22 @@ namespace Lamie.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_sales_order_item_ingredient_snapshots_sales_order_items_order_item_id");
+                });
+
+            modelBuilder.Entity("Lamie.Domain.Entities.OrderPayment", b =>
+                {
+                    b.HasOne("Lamie.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("CreatedById")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_fin_order_payments_users_created_by_id");
+
+                    b.HasOne("Lamie.Domain.Entities.Order", null)
+                        .WithMany()
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_fin_order_payments_orders_order_id");
                 });
 
             modelBuilder.Entity("Lamie.Domain.Entities.Product", b =>

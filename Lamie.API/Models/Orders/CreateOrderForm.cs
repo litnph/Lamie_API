@@ -12,7 +12,7 @@ public sealed class CreateOrderForm
     public Guid? CustomerId { get; init; }
     public bool? CreateMember { get; init; }
     public Guid? ChannelId { get; init; }
-    public string RecipientName { get; init; } = string.Empty;
+    public string? RecipientName { get; init; }
     public string? RecipientPhone { get; init; }
     public string? SenderName { get; init; }
     public string? SenderPhone { get; init; }
@@ -35,6 +35,10 @@ public sealed class CreateOrderForm
     public DateTimeOffset? DeliveryTo { get; init; }
     public decimal? DepositAmount { get; init; }
     public bool IsPaid { get; init; }
+    public bool ConfirmPaymentReceived { get; init; }
+    public DateTimeOffset? PaymentReceivedAt { get; init; }
+    public PaymentMethod? PaymentMethod { get; init; }
+    public string? PaymentIdempotencyKey { get; init; }
     public decimal ShippingFee { get; init; }
     public decimal? ShippingFeeActual { get; init; }
     public string? Description { get; init; }
@@ -66,7 +70,7 @@ public sealed class UpdateOrderForm
     public Guid? CustomerId { get; init; }
     public bool? CreateMember { get; init; }
     public Guid ChannelId { get; init; }
-    public string RecipientName { get; init; } = string.Empty;
+    public string? RecipientName { get; init; }
     public string? RecipientPhone { get; init; }
     public string? SenderName { get; init; }
     public string? SenderPhone { get; init; }

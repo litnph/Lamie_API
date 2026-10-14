@@ -180,7 +180,8 @@ public sealed class InventoryTests
             await inventory.SaveOrderMaterialsAsync(order.Id,
                 new SaveOrderMaterialsRequest([new SaveOrderMaterialItem(null, stockUnit.Id, 2)], null), CancellationToken.None);
             var orders = new OrderService(dbContext, storage, http, clock, inventory);
-            await orders.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
             Assert.Equal(3, Assert.Single(await inventory.GetItemStockUnitsAsync(item.Id, CancellationToken.None)).Quantity);
             Assert.Equal(1, (await inventory.ListReplenishmentTasksAsync(
                 new InventoryListQuery { Page = 1, PageSize = 20 }, CancellationToken.None)).TotalCount);
@@ -193,7 +194,7 @@ public sealed class InventoryTests
             Assert.Equal(1, (await inventory.ListReplenishmentTasksAsync(
                 new InventoryListQuery { Page = 1, PageSize = 20 }, CancellationToken.None)).TotalCount);
 
-            await orders.ChangeStatusAsync(order.Id, OrderStatus.Cancelled, CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "cancel", new(Reason: "Khách hủy"), CancellationToken.None);
             Assert.Equal(5, Assert.Single(await inventory.GetItemStockUnitsAsync(item.Id, CancellationToken.None)).Quantity);
             Assert.Equal(0, (await inventory.ListReplenishmentTasksAsync(
                 new InventoryListQuery { Page = 1, PageSize = 20 }, CancellationToken.None)).TotalCount);
@@ -287,8 +288,9 @@ public sealed class InventoryTests
             Assert.Equal(12, (await inventory.GetIngredientStockUnitsAsync(ingredient.Id, CancellationToken.None)).Single(item => item.Id == stockUnit.Id).Quantity);
 
             var orders = new OrderService(dbContext, storage, http, clock, inventory);
-            await orders.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
-            await orders.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
             Assert.Equal(8, (await inventory.GetIngredientStockUnitsAsync(ingredient.Id, CancellationToken.None)).Single(item => item.Id == stockUnit.Id).Quantity);
             Assert.Single(await dbContext.StockTransactions.Where(item => item.OrderId == order.Id && item.Type == StockTransactionType.OrderUsage).ToListAsync());
 
@@ -302,7 +304,7 @@ public sealed class InventoryTests
             ], null), CancellationToken.None);
             Assert.Equal(9, (await inventory.GetIngredientStockUnitsAsync(ingredient.Id, CancellationToken.None)).Single(item => item.Id == stockUnit.Id).Quantity);
 
-            await orders.ChangeStatusAsync(order.Id, OrderStatus.Cancelled, CancellationToken.None);
+            await orders.RunWorkflowActionAsync(order.Id, "cancel", new(Reason: "Khách hủy"), CancellationToken.None);
             Assert.Equal(12, (await inventory.GetIngredientStockUnitsAsync(ingredient.Id, CancellationToken.None)).Single(item => item.Id == stockUnit.Id).Quantity);
             Assert.Equal(0, (await inventory.GetOrderMaterialsAsync(order.Id, CancellationToken.None)).Single().DeductedQuantity);
             Assert.Contains(await dbContext.StockTransactions.Where(item => item.OrderId == order.Id).ToListAsync(), item => item.Type == StockTransactionType.OrderReturn);
@@ -342,9 +344,10 @@ public sealed class InventoryTests
                 new SaveOrderMaterialsRequest([new SaveOrderMaterialItem(null, stockUnit.Id, 1)], null), CancellationToken.None);
             var orders = new OrderService(dbContext, storage, new HttpContextAccessor(), clock, inventory);
 
-            await Assert.ThrowsAsync<ConflictException>(() => orders.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None));
+            await orders.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+            await Assert.ThrowsAsync<ConflictException>(() => orders.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None));
             dbContext.ChangeTracker.Clear();
-            Assert.Equal(OrderStatus.Created, (await dbContext.Orders.SingleAsync(item => item.Id == order.Id)).OrderStatus);
+            Assert.Equal(OrderStatus.Confirmed, (await dbContext.Orders.SingleAsync(item => item.Id == order.Id)).OrderStatus);
             Assert.Equal(0, (await dbContext.InventoryStockUnits.SingleAsync(item => item.Id == stockUnit.Id)).Quantity);
             Assert.Empty(await dbContext.StockTransactions.Where(item => item.OrderId == order.Id).ToListAsync());
         }
@@ -408,7 +411,7 @@ public sealed class InventoryTests
         $"L{now:yyMMdd}-{Guid.NewGuid():N}"[..16].ToUpperInvariant(),
         Channel.AdminId,
         null,
-        new OrderDetails("Orderer", "", "Recipient", "0900000000", false, false, null, null, null, null,
+        new OrderDetails("Orderer", "0900000001", "Recipient", "0900000000", false, false, null, null, null, null,
             now.AddDays(1), null, 0, 0, null, null, null),
         [new OrderItemSnapshot(null, null, "Custom bouquet", null, 100000, 1)],
         now,

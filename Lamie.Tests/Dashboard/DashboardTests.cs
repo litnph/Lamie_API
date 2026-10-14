@@ -32,10 +32,10 @@ public sealed class DashboardTests
     }
 
     [Theory]
-    [InlineData(PaymentStatus.Paid, OrderStatus.Created, true)]
+    [InlineData(PaymentStatus.Paid, OrderStatus.Created, false)]
     [InlineData(PaymentStatus.Paid, OrderStatus.Completed, true)]
     [InlineData(PaymentStatus.Paid, OrderStatus.Cancelled, false)]
-    [InlineData(PaymentStatus.Deposited, OrderStatus.Completed, false)]
+    [InlineData(PaymentStatus.Deposited, OrderStatus.Completed, true)]
     public void RevenueRuleMatchesSourceDashboard(
         PaymentStatus paymentStatus,
         OrderStatus orderStatus,
@@ -134,12 +134,12 @@ public sealed class DashboardTests
                 null,
                 new OrderDetails(
                     "Người đặt",
-                    string.Empty,
+                    "0900000001",
                     "Người nhận",
                     "0912345678",
                     false,
                     false,
-                    null,
+                    "123 Test Street",
                     null,
                     null,
                     null,
@@ -155,6 +155,12 @@ public sealed class DashboardTests
                 null,
                 "dashboard-test");
             order.ChangePaymentStatus(PaymentStatus.Paid, createdAt.AddMinutes(1), null, "dashboard-test");
+            order.ChangeStatus(OrderStatus.Confirmed, false, createdAt.AddMinutes(2), null, "dashboard-test");
+            order.ChangeStatus(OrderStatus.Producing, false, createdAt.AddMinutes(3), null, "dashboard-test");
+            order.UpdateChecklist(true, true, true, true, createdAt.AddMinutes(4), null, "dashboard-test");
+            order.ChangeStatus(OrderStatus.Ready, false, createdAt.AddMinutes(5), null, "dashboard-test");
+            order.ChangeStatus(OrderStatus.Shipping, false, createdAt.AddMinutes(6), null, "dashboard-test");
+            order.ChangeStatus(OrderStatus.Delivered, false, createdAt.AddDays(1), null, "dashboard-test");
             dbContext.Orders.Add(order);
             await dbContext.SaveChangesAsync();
 

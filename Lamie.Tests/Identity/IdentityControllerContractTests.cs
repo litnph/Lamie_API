@@ -52,6 +52,9 @@ public sealed class IdentityControllerContractTests
         Assert.Contains(PermissionNames.OrdersReverseStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Admin));
         Assert.DoesNotContain(PermissionNames.OrdersReverseStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Manager));
         Assert.DoesNotContain(PermissionNames.OrdersReverseStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Staff));
+        Assert.Contains(PermissionNames.OrdersChangeStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Admin));
+        Assert.DoesNotContain(PermissionNames.OrdersChangeStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Manager));
+        Assert.DoesNotContain(PermissionNames.OrdersChangeStatus, BuiltInRolePermissionDefaults.Get(BuiltInRole.Staff));
     }
 
     [Fact]

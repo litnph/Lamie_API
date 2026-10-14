@@ -132,8 +132,8 @@ public sealed class NavigationBackendTests
             await dbContext.Database.MigrateAsync();
             await dbContext.Database.MigrateAsync();
 
-            Assert.Equal(47, await dbContext.Navigation.CountAsync());
-            Assert.Equal(47, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
+            Assert.Equal(49, await dbContext.Navigation.CountAsync());
+            Assert.Equal(49, await dbContext.Navigation.Select(item => item.Key).Distinct().CountAsync());
             Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "tasks.workspace")).ParentId is null);
             Assert.False((await dbContext.Navigation.SingleAsync(item => item.Key == "catalog-settings.home")).ParentId is null);
             var catalogSettings = await dbContext.Navigation.SingleAsync(item => item.Key == "catalog-settings.home");
@@ -206,7 +206,7 @@ public sealed class NavigationBackendTests
         {
             await dbContext.Database.MigrateAsync();
             Assert.Equal(0, await CountForeignKeysAsync(dbContext));
-            Assert.Equal(47, await dbContext.Navigation.CountAsync());
+            Assert.Equal(49, await dbContext.Navigation.CountAsync());
             dbContext.Navigation.RemoveRange(dbContext.Navigation);
             await dbContext.SaveChangesAsync();
 

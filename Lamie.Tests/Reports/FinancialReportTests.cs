@@ -54,11 +54,11 @@ public sealed class FinancialReportTests
     }
 
     [Theory]
-    [InlineData(PaymentStatus.Paid, OrderStatus.Created, true)]
+    [InlineData(PaymentStatus.Paid, OrderStatus.Created, false)]
     [InlineData(PaymentStatus.Paid, OrderStatus.Completed, true)]
     [InlineData(PaymentStatus.Paid, OrderStatus.Cancelled, false)]
     [InlineData(PaymentStatus.Deposited, OrderStatus.Created, false)]
-    public void RevenueRuleUsesPaidNonCancelledOrders(
+    public void RevenueRuleUsesCompletedOrdersRegardlessOfPaymentTiming(
         PaymentStatus paymentStatus,
         OrderStatus orderStatus,
         bool expected) =>
@@ -107,6 +107,7 @@ public sealed class FinancialReportTests
         using var stream = new MemoryStream(excel.Content);
         var workbook = XDocument.Load(stream);
         var html = Encoding.UTF8.GetString(printable.Content);
+        var decodedHtml = System.Net.WebUtility.HtmlDecode(html);
 
         Assert.Equal("application/vnd.ms-excel", excel.ContentType);
         Assert.EndsWith(".xls", excel.FileName, StringComparison.Ordinal);
@@ -115,8 +116,9 @@ public sealed class FinancialReportTests
         Assert.Equal("text/html; charset=utf-8", printable.ContentType);
         Assert.Contains("window.print()", html);
         Assert.Contains("&lt;script&gt;", html);
-        Assert.Contains("Tiền sản phẩm", html);
-        Assert.Contains("Phí giao hàng", html);
+        Assert.Contains("Phí ship thực tế", decodedHtml);
+        Assert.Contains("Chi phí khác", decodedHtml);
+        Assert.Contains("Chênh lệch tạm tính", decodedHtml);
         Assert.DoesNotContain("<script>alert('x')</script>", html, StringComparison.Ordinal);
     }
 
@@ -158,11 +160,13 @@ public sealed class FinancialReportTests
                 productType.Id,
                 "Hoa tươi");
             paidOrder.ChangePaymentStatus(PaymentStatus.Paid, createdOutsidePeriod.AddMinutes(1), null, "report-test");
+            Deliver(paidOrder, createdOutsidePeriod.AddMinutes(2), deliveryInsidePeriod);
             var paidOutsidePeriod = CreateOrder("REPORT-OUTSIDE", 300000, deliveryInsidePeriod, deliveryOutsidePeriod);
             paidOutsidePeriod.ChangePaymentStatus(PaymentStatus.Paid, deliveryInsidePeriod.AddMinutes(1), null, "report-test");
+            Deliver(paidOutsidePeriod, deliveryInsidePeriod.AddMinutes(2), deliveryOutsidePeriod);
             var cancelledOrder = CreateOrder("REPORT-CANCELLED", 200000, createdOutsidePeriod, deliveryInsidePeriod);
             cancelledOrder.ChangePaymentStatus(PaymentStatus.Paid, createdOutsidePeriod.AddMinutes(1), null, "report-test");
-            cancelledOrder.ChangeStatus(OrderStatus.Cancelled, false, createdOutsidePeriod.AddMinutes(2), null, "report-test");
+            cancelledOrder.ChangeStatus(OrderStatus.Cancelled, false, createdOutsidePeriod.AddMinutes(2), null, "report-test", "Khách hủy");
             var category = new ExpenseCategory("Vận chuyển", null, 10, true, createdOutsidePeriod);
             var expense = new Expense(
                 category.Id,
@@ -172,6 +176,19 @@ public sealed class FinancialReportTests
                 null,
                 createdOutsidePeriod);
             dbContext.Orders.AddRange(paidOrder, paidOutsidePeriod, cancelledOrder);
+            dbContext.OrderPayments.Add(new OrderPayment(
+                paidOrder.Id,
+                110000,
+                OrderPaymentKind.Refund,
+                PaymentMethod.BankTransfer,
+                deliveryInsidePeriod.AddHours(2),
+                "recognized-revenue-refund",
+                "Hoàn một phần sau giao",
+                deliveryInsidePeriod.AddHours(2),
+                null,
+                true,
+                100000,
+                10000));
             dbContext.ExpenseCategories.Add(category);
             dbContext.Expenses.Add(expense);
             await dbContext.SaveChangesAsync();
@@ -185,26 +202,34 @@ public sealed class FinancialReportTests
                 IncludeShippingFeeInRevenue = false
             }, CancellationToken.None);
 
-            Assert.Equal(500000, report.Revenue);
-            Assert.Equal(500000, report.ProductRevenue);
-            Assert.Equal(50000, report.ShippingFee);
+            Assert.Equal(400000, report.Revenue);
+            Assert.Equal(400000, report.ProductRevenue);
+            Assert.Equal(40000, report.ShippingFee);
             Assert.False(report.IncludeShippingFeeInRevenue);
             Assert.Equal(150000, report.Expense);
-            Assert.Equal(350000, report.Profit);
-            Assert.Equal(70, report.ProfitMarginPercent);
+            Assert.Equal(290000, report.Profit);
+            Assert.Equal(65.91m, report.ProfitMarginPercent);
             Assert.Equal(1, report.OrderCount);
             Assert.Equal(1, report.ExpenseCount);
-            Assert.Equal(350000, Assert.Single(report.Points).Profit);
+            var dailyOrder = Assert.Single(report.DailyOrders);
+            Assert.Equal(paidOrder.Id, dailyOrder.Id);
+            Assert.Equal(new DateOnly(2026, 8, 3), dailyOrder.DeliveryDate);
+            Assert.Equal(500000, dailyOrder.ProductRevenue);
+            Assert.Equal(50000, dailyOrder.ShippingFee);
+            Assert.Equal(290000, Assert.Single(report.Points).Profit);
+            var adjustment = Assert.Single(report.DailyRevenueAdjustments);
+            Assert.Equal(100000, adjustment.ProductRevenueAdjustment);
+            Assert.Equal(10000, adjustment.ShippingRevenueAdjustment);
             Assert.Equal("Vận chuyển", Assert.Single(report.ExpensesByCategory).ExpenseCategoryName);
-            Assert.Contains("ngày giao hàng", report.RevenueBasis);
+            Assert.Contains("ngày hoàn tất", report.RevenueBasis);
             var revenueByProductLine = Assert.Single(report.RevenueByProductLine);
             Assert.Equal(productType.Id, revenueByProductLine.Id);
             Assert.Equal("Hoa tươi", revenueByProductLine.Name);
-            Assert.Equal(500000, revenueByProductLine.Revenue);
+            Assert.Equal(400000, revenueByProductLine.Revenue);
             var revenueByCategory = Assert.Single(report.RevenueByCategory);
             Assert.Equal(productCategory.Id, revenueByCategory.Id);
             Assert.Equal("Hoa bó", revenueByCategory.Name);
-            Assert.Equal(500000, revenueByCategory.Revenue);
+            Assert.Equal(400000, revenueByCategory.Revenue);
 
             var reportIncludingShipping = await service.GetAsync(new FinancialReportQuery
             {
@@ -214,16 +239,85 @@ public sealed class FinancialReportTests
                 IncludeShippingFeeInRevenue = true
             }, CancellationToken.None);
 
-            Assert.Equal(550000, reportIncludingShipping.Revenue);
-            Assert.Equal(400000, reportIncludingShipping.Profit);
-            Assert.Equal(500000, reportIncludingShipping.ProductRevenue);
-            Assert.Equal(50000, reportIncludingShipping.ShippingFee);
+            Assert.Equal(440000, reportIncludingShipping.Revenue);
+            Assert.Equal(290000, reportIncludingShipping.Profit);
+            Assert.Equal(400000, reportIncludingShipping.ProductRevenue);
+            Assert.Equal(40000, reportIncludingShipping.ShippingFee);
             Assert.True(reportIncludingShipping.IncludeShippingFeeInRevenue);
         }
         finally
         {
             await dbContext.Database.EnsureDeletedAsync();
         }
+    }
+
+    [Fact]
+    public async Task DepositCompletionAndRemainderAreRecognizedOnTheirOwnBusinessDates()
+    {
+        var databaseName = $"LamieReportTimeline_{Guid.NewGuid():N}";
+        var connectionString = $"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;MultipleActiveResultSets=true";
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(connectionString)
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        await using var dbContext = new AppDbContext(options);
+
+        try
+        {
+            await dbContext.Database.EnsureCreatedAsync();
+            var createdAt = new DateTime(2026, 10, 9, 2, 0, 0, DateTimeKind.Utc);
+            var depositAt = new DateTime(2026, 10, 9, 3, 0, 0, DateTimeKind.Utc);
+            var completedAt = new DateTime(2026, 10, 10, 3, 0, 0, DateTimeKind.Utc);
+            var remainderAt = new DateTime(2026, 10, 11, 3, 0, 0, DateTimeKind.Utc);
+            var order = CreateOrder("REPORT-THREE-DAYS", 1_100_000, createdAt, completedAt, 50_000);
+            Deliver(order, createdAt.AddMinutes(1), completedAt);
+
+            dbContext.Orders.Add(order);
+            dbContext.OrderPayments.AddRange(
+                new OrderPayment(order.Id, 600_000, OrderPaymentKind.Deposit, PaymentMethod.BankTransfer,
+                    depositAt, "three-days-deposit", null, depositAt, null),
+                new OrderPayment(order.Id, 550_000, OrderPaymentKind.Remainder, PaymentMethod.Cash,
+                    remainderAt, "three-days-remainder", null, remainderAt, null));
+            await dbContext.SaveChangesAsync();
+
+            var clock = new FixedTimeProvider(new DateTimeOffset(2026, 10, 12, 3, 0, 0, TimeSpan.Zero));
+            var service = new FinancialReportService(dbContext, clock);
+            var cash = await service.GetCashFlowAsync(new FinancialReportQuery
+            {
+                From = new DateOnly(2026, 10, 9),
+                To = new DateOnly(2026, 10, 11),
+                GroupBy = "day"
+            }, CancellationToken.None);
+            var revenue = await service.GetAsync(new FinancialReportQuery
+            {
+                From = new DateOnly(2026, 10, 9),
+                To = new DateOnly(2026, 10, 11),
+                GroupBy = "day"
+            }, CancellationToken.None);
+
+            Assert.Equal(600_000, cash.Points.Single(point => point.Date == new DateOnly(2026, 10, 9)).CashIn);
+            Assert.Equal(550_000, cash.Points.Single(point => point.Date == new DateOnly(2026, 10, 11)).CashIn);
+            Assert.Equal(1_150_000, cash.CashIn);
+            Assert.Equal(2, cash.Transactions.Count);
+            Assert.Equal(0, revenue.Points.Single(point => point.From == new DateOnly(2026, 10, 9)).Revenue);
+            Assert.Equal(1_150_000, revenue.Points.Single(point => point.From == new DateOnly(2026, 10, 10)).Revenue);
+            Assert.Equal(0, revenue.Points.Single(point => point.From == new DateOnly(2026, 10, 11)).Revenue);
+            Assert.Equal(1_150_000, revenue.Revenue);
+        }
+        finally
+        {
+            await dbContext.Database.EnsureDeletedAsync();
+        }
+    }
+
+    private static void Deliver(Order order, DateTime startedAt, DateTime deliveredAt)
+    {
+        order.ChangeStatus(OrderStatus.Confirmed, false, startedAt, null, "report-test");
+        order.ChangeStatus(OrderStatus.Producing, true, startedAt.AddSeconds(1), null, "report-test");
+        order.UpdateChecklist(true, true, true, true, startedAt.AddSeconds(2), null, "report-test");
+        order.ChangeStatus(OrderStatus.Ready, true, startedAt.AddSeconds(3), null, "report-test");
+        order.ChangeStatus(OrderStatus.Shipping, true, startedAt.AddSeconds(4), null, "report-test");
+        order.ChangeStatus(OrderStatus.Delivered, true, deliveredAt, null, "report-test");
     }
 
     private static Order CreateOrder(
@@ -240,12 +334,12 @@ public sealed class FinancialReportTests
         null,
         new OrderDetails(
             "Người đặt",
-            string.Empty,
+            "0900000001",
             "Người nhận",
             "0912345678",
             false,
             false,
-            null,
+            "123 Test Street",
             null,
             null,
             null,

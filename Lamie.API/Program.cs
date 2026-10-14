@@ -13,6 +13,7 @@ using Lamie.Application.Common.Uploads;
 using Lamie.Application.Content;
 using Lamie.Application.Expenses;
 using Lamie.Application.FeData;
+using Lamie.Application.Finance;
 using Lamie.Application.Identity;
 using Lamie.Application.Ingredients;
 using Lamie.Application.Reports;
@@ -207,6 +208,9 @@ builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<IExpenseCategoryService, ExpenseCategoryService>();
 builder.Services.AddScoped<IExpenseService, ExpenseService>();
+builder.Services.AddScoped<FinanceOperationsService>();
+builder.Services.AddScoped<IFinanceOperationsService>(services => services.GetRequiredService<FinanceOperationsService>());
+builder.Services.AddScoped<IFinancePeriodGuard>(services => services.GetRequiredService<FinanceOperationsService>());
 builder.Services.AddScoped<IFinancialReportService, FinancialReportService>();
 builder.Services.AddSingleton<IFinancialReportExportService, FinancialReportExportService>();
 builder.Services.AddHttpClient<IContentAiProvider, OpenAIContentAiProvider>(client =>

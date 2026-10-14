@@ -219,7 +219,7 @@ public sealed class CustomerService : ICustomerService
     private static CustomerDetailDto ToDetail(Customer customer, IReadOnlyList<Order> orders)
     {
         var paidOrders = orders.Where(order => CountsAsSpending(order.PaymentStatus, order.OrderStatus)).ToList();
-        var orderDtos = orders.Select(OrderService.ToListDto).ToList();
+        var orderDtos = orders.Select(order => OrderService.ToListDto(order)).ToList();
         var addresses = orders
             .Where(order => !order.PickupAtShop && !string.IsNullOrWhiteSpace(order.DeliveryAddress))
             .GroupBy(order => order.DeliveryAddress!.Trim(), StringComparer.Create(new System.Globalization.CultureInfo("vi-VN"), true))

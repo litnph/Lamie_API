@@ -6,6 +6,7 @@ using Lamie.API.Models.Orders;
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Common.Storage;
 using Lamie.Application.Common.Uploads;
+using Lamie.Application.Finance;
 using Lamie.Application.Orders;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Orders;
@@ -25,19 +26,22 @@ public sealed class OrderService : IOrderService
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly TimeProvider _timeProvider;
     private readonly IInventoryService? _inventoryService;
+    private readonly IFinancePeriodGuard? _financePeriodGuard;
 
     public OrderService(
         AppDbContext dbContext,
         IFileStorage fileStorage,
         IHttpContextAccessor httpContextAccessor,
         TimeProvider timeProvider,
-        IInventoryService? inventoryService = null)
+        IInventoryService? inventoryService = null,
+        IFinancePeriodGuard? financePeriodGuard = null)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _httpContextAccessor = httpContextAccessor;
         _timeProvider = timeProvider;
         _inventoryService = inventoryService;
+        _financePeriodGuard = financePeriodGuard;
     }
 
     private IInventoryService RequireInventoryService() =>
@@ -55,17 +59,31 @@ public sealed class OrderService : IOrderService
         ValidateEnum<SortDirection>(request.SortDirection, nameof(request.SortDirection));
         ValidateDateRange(request.CreatedFrom, request.CreatedTo, nameof(request.CreatedFrom));
         ValidateDateRange(request.DeliveryFrom, request.DeliveryTo, nameof(request.DeliveryFrom));
+        ValidateDateRange(request.CompletedFrom, request.CompletedTo, nameof(request.CompletedFrom));
 
         IQueryable<Order> query = _dbContext.Orders.AsNoTracking();
         if (request.OrderStatus.HasValue)
             query = query.Where(order => order.OrderStatus == request.OrderStatus.Value);
+        else if (string.Equals(request.StatusGroup, "incomplete", StringComparison.OrdinalIgnoreCase))
+            query = query.Where(order => order.OrderStatus == OrderStatus.Created
+                || order.OrderStatus == OrderStatus.Confirmed
+                || order.OrderStatus == OrderStatus.Producing
+                || order.OrderStatus == OrderStatus.Ready
+                || order.OrderStatus == OrderStatus.Shipping
+                || order.OrderStatus == OrderStatus.DeliveryFailed
+                || order.OrderStatus == OrderStatus.Delivered);
+        else if (!string.IsNullOrWhiteSpace(request.StatusGroup)
+                 && !string.Equals(request.StatusGroup, "all", StringComparison.OrdinalIgnoreCase))
+            throw Validation(nameof(request.StatusGroup), "Status group must be incomplete or all.");
         if (request.PaymentStatus.HasValue)
             query = query.Where(order => order.PaymentStatus == request.PaymentStatus.Value);
         if (request.ChannelId.HasValue)
             query = query.Where(order => order.ChannelId == request.ChannelId.Value);
+        query = ApplyFulfillmentFilter(query, request.FulfillmentType);
 
         query = ApplyDateRange(query, request.CreatedFrom, request.CreatedTo, order => order.CreatedAt);
         query = ApplyDateRange(query, request.DeliveryFrom, request.DeliveryTo, order => order.DeliveryAt);
+        query = ApplyDateRange(query, request.CompletedFrom, request.CompletedTo, order => order.CompletedAt ?? DateTime.MinValue);
 
         if (!string.IsNullOrWhiteSpace(request.Phone))
         {
@@ -74,7 +92,7 @@ public sealed class OrderService : IOrderService
             {
                 query = query.Where(order =>
                     order.OrdererPhone.Replace(" ", "").Replace("-", "").Contains(phone) ||
-                    order.RecipientPhone.Replace(" ", "").Replace("-", "").Contains(phone));
+                    (order.RecipientPhone != null && order.RecipientPhone.Replace(" ", "").Replace("-", "").Contains(phone)));
             }
         }
 
@@ -85,8 +103,9 @@ public sealed class OrderService : IOrderService
                 order.OrderCode.Contains(search) ||
                 order.OrdererName.Contains(search) ||
                 order.OrdererPhone.Contains(search) ||
-                order.RecipientName.Contains(search) ||
-                order.RecipientPhone.Contains(search) ||
+                (order.RecipientName != null && order.RecipientName.Contains(search)) ||
+                (order.RecipientPhone != null && order.RecipientPhone.Contains(search)) ||
+                order.Items.Any(item => item.ProductName.Contains(search)) ||
                 (order.DeliveryAddress != null && order.DeliveryAddress.Contains(search)));
         }
 
@@ -112,8 +131,17 @@ public sealed class OrderService : IOrderService
             .ToListAsync(cancellationToken);
         var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)request.PageSize);
 
+        var paymentTotals = await PaymentTotalsAsync(orders.Select(order => order.Id), cancellationToken);
+        var channelNames = await ChannelNamesAsync(orders.Select(order => order.ChannelId), cancellationToken);
+        var nowUtc = UtcNow();
+
         return new PagedOrdersDto(
-            orders.Select(ToListDto).ToList(),
+            orders.Select(order => ToListDto(
+                order,
+                paymentTotals.GetValueOrDefault(order.Id).Amount,
+                paymentTotals.GetValueOrDefault(order.Id).Count,
+                channelNames.GetValueOrDefault(order.ChannelId),
+                nowUtc)).ToList(),
             totalCount,
             request.Page,
             request.PageSize,
@@ -122,10 +150,174 @@ public sealed class OrderService : IOrderService
             request.Page > 1);
     }
 
+    public async Task<OrderDeliveryBoardDto> DeliveryBoardAsync(
+        OrderListQuery request,
+        CancellationToken cancellationToken)
+    {
+        if (request.Page < 1)
+            throw Validation(nameof(request.Page), "Page must be greater than or equal to 1.");
+        if (request.PageSize is < 1 or > MaximumPageSize)
+            throw Validation(nameof(request.PageSize), $"Page size must be between 1 and {MaximumPageSize}.");
+        ValidateEnum(request.OrderStatus, nameof(request.OrderStatus));
+        ValidateEnum(request.PaymentStatus, nameof(request.PaymentStatus));
+        ValidateDateRange(request.CreatedFrom, request.CreatedTo, nameof(request.CreatedFrom));
+        ValidateDateRange(request.DeliveryFrom, request.DeliveryTo, nameof(request.DeliveryFrom));
+        ValidateDateRange(request.CompletedFrom, request.CompletedTo, nameof(request.CompletedFrom));
+        ValidateDateRange(request.CompletedFrom, request.CompletedTo, nameof(request.CompletedFrom));
+
+        IQueryable<Order> baseQuery = _dbContext.Orders.AsNoTracking();
+        if (request.OrderStatus.HasValue)
+            baseQuery = baseQuery.Where(order => order.OrderStatus == request.OrderStatus.Value);
+        else if (string.Equals(request.StatusGroup, "incomplete", StringComparison.OrdinalIgnoreCase))
+            baseQuery = baseQuery.Where(order => order.OrderStatus == OrderStatus.Created
+                || order.OrderStatus == OrderStatus.Confirmed
+                || order.OrderStatus == OrderStatus.Producing
+                || order.OrderStatus == OrderStatus.Ready
+                || order.OrderStatus == OrderStatus.Shipping
+                || order.OrderStatus == OrderStatus.DeliveryFailed
+                || order.OrderStatus == OrderStatus.Delivered);
+        else if (!string.IsNullOrWhiteSpace(request.StatusGroup)
+                 && !string.Equals(request.StatusGroup, "all", StringComparison.OrdinalIgnoreCase))
+            throw Validation(nameof(request.StatusGroup), "Status group must be incomplete or all.");
+
+        if (request.PaymentStatus.HasValue)
+            baseQuery = baseQuery.Where(order => order.PaymentStatus == request.PaymentStatus.Value);
+        if (request.ChannelId.HasValue)
+            baseQuery = baseQuery.Where(order => order.ChannelId == request.ChannelId.Value);
+        baseQuery = ApplyFulfillmentFilter(baseQuery, request.FulfillmentType);
+        baseQuery = ApplyDateRange(baseQuery, request.CreatedFrom, request.CreatedTo, order => order.CreatedAt);
+
+        if (!string.IsNullOrWhiteSpace(request.Phone))
+        {
+            var phone = new string(request.Phone.Where(char.IsDigit).ToArray());
+            if (phone.Length > 0)
+                baseQuery = baseQuery.Where(order =>
+                    order.OrdererPhone.Replace(" ", "").Replace("-", "").Contains(phone)
+                    || (order.RecipientPhone != null && order.RecipientPhone.Replace(" ", "").Replace("-", "").Contains(phone)));
+        }
+        if (!string.IsNullOrWhiteSpace(request.Search))
+        {
+            var search = request.Search.Trim();
+            baseQuery = baseQuery.Where(order =>
+                order.OrderCode.Contains(search)
+                || order.OrdererName.Contains(search)
+                || order.OrdererPhone.Contains(search)
+                || (order.RecipientName != null && order.RecipientName.Contains(search))
+                || (order.RecipientPhone != null && order.RecipientPhone.Contains(search))
+                || order.Items.Any(item => item.ProductName.Contains(search))
+                || (order.DeliveryAddress != null && order.DeliveryAddress.Contains(search)));
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        var localNow = TimeZoneInfo.ConvertTime(now, BusinessTimeZone);
+        var localToday = DateOnly.FromDateTime(localNow.DateTime);
+        var todayStartUtc = BusinessStartUtc(localToday);
+        var tomorrowStartUtc = BusinessStartUtc(localToday.AddDays(1));
+        IQueryable<Order> rangeQuery;
+        if (request.IncludeBacklog && request.DeliveryFrom.HasValue)
+        {
+            var from = request.DeliveryFrom.Value.UtcDateTime;
+            var to = request.DeliveryTo?.UtcDateTime;
+            rangeQuery = baseQuery.Where(order =>
+                (order.DeliveryAt >= from && (!to.HasValue || order.DeliveryAt <= to.Value))
+                || (order.DeliveryAt < from
+                    && order.OrderStatus != OrderStatus.Completed
+                    && order.OrderStatus != OrderStatus.Cancelled));
+        }
+        else
+        {
+            rangeQuery = ApplyDateRange(baseQuery, request.DeliveryFrom, request.DeliveryTo, order => order.DeliveryAt);
+        }
+        if (request.CompletedFrom.HasValue || request.CompletedTo.HasValue)
+            rangeQuery = ApplyDateRange(rangeQuery, request.CompletedFrom, request.CompletedTo, order => order.CompletedAt ?? DateTime.MinValue);
+
+        var totalCount = await rangeQuery.CountAsync(cancellationToken);
+        var overdueCount = await rangeQuery.CountAsync(order => order.DeliveryAt < todayStartUtc
+            && order.OrderStatus != OrderStatus.Completed
+            && order.OrderStatus != OrderStatus.Cancelled
+            && order.OrderStatus != OrderStatus.Delivered, cancellationToken);
+        var orders = await rangeQuery
+            .OrderBy(order =>
+                order.OrderStatus != OrderStatus.Completed
+                && order.OrderStatus != OrderStatus.Cancelled
+                && order.OrderStatus != OrderStatus.Delivered
+                && order.DeliveryAt < now.UtcDateTime
+                    ? 0
+                    : order.OrderStatus != OrderStatus.Completed
+                      && order.OrderStatus != OrderStatus.Cancelled
+                      && order.OrderStatus != OrderStatus.Delivered
+                      && order.DeliveryAt >= now.UtcDateTime
+                        ? 1
+                        : order.OrderStatus != OrderStatus.Cancelled
+                          && order.PaymentStatus != PaymentStatus.Paid
+                            ? 2
+                            : order.OrderStatus == OrderStatus.Completed
+                                ? 3
+                                : 4)
+            .ThenBy(order => order.DeliveryAt)
+            .ThenBy(order => order.OrderCode)
+            .Skip((request.Page - 1) * request.PageSize)
+            .Take(request.PageSize)
+            .Include(order => order.Items)
+            .Include(order => order.Images)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+        var totals = await PaymentTotalsAsync(orders.Select(order => order.Id), cancellationToken);
+        var channelNames = await ChannelNamesAsync(orders.Select(order => order.ChannelId), cancellationToken);
+        var items = orders.Select(order => ToListDto(
+            order,
+            totals.GetValueOrDefault(order.Id).Amount,
+            totals.GetValueOrDefault(order.Id).Count,
+            channelNames.GetValueOrDefault(order.ChannelId),
+            now.UtcDateTime)).ToList();
+
+        var totalAmount = await rangeQuery.SumAsync(order => (decimal?)order.TotalAmount, cancellationToken) ?? 0;
+        var filteredIds = rangeQuery.Select(order => order.Id);
+        var paidAmount = await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => filteredIds.Contains(payment.OrderId) && payment.Status == PaymentTransactionStatus.Succeeded)
+            .SumAsync(payment => (decimal?)(payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount), cancellationToken) ?? 0;
+        var lateCount = await rangeQuery.CountAsync(order => order.DeliveryAt < now.UtcDateTime && order.OrderStatus != OrderStatus.Completed && order.OrderStatus != OrderStatus.Cancelled && order.OrderStatus != OrderStatus.Delivered, cancellationToken);
+        var undeliveredTodayCount = await rangeQuery.CountAsync(order => order.DeliveryAt >= todayStartUtc && order.DeliveryAt < tomorrowStartUtc && order.OrderStatus != OrderStatus.Completed && order.OrderStatus != OrderStatus.Cancelled && order.OrderStatus != OrderStatus.Delivered, cancellationToken);
+        var upcomingCount = await rangeQuery.CountAsync(order => order.DeliveryAt >= tomorrowStartUtc && order.OrderStatus != OrderStatus.Completed && order.OrderStatus != OrderStatus.Cancelled && order.OrderStatus != OrderStatus.Delivered, cancellationToken);
+        var deliveredUnpaidCount = await rangeQuery.CountAsync(order => order.OrderStatus == OrderStatus.Delivered && order.PaymentStatus != PaymentStatus.Paid, cancellationToken);
+        var completedCount = await rangeQuery.CountAsync(order => order.OrderStatus == OrderStatus.Completed, cancellationToken);
+        var cancelledCount = await rangeQuery.CountAsync(order => order.OrderStatus == OrderStatus.Cancelled, cancellationToken);
+
+        var summary = new OrderDeliveryBoardSummaryDto(
+            totalCount,
+            undeliveredTodayCount,
+            lateCount,
+            totalAmount,
+            paidAmount,
+            Math.Max(0, totalAmount - paidAmount),
+            overdueCount)
+        {
+            LateCount = lateCount,
+            UndeliveredTodayCount = undeliveredTodayCount,
+            UpcomingCount = upcomingCount,
+            DeliveredUnpaidCount = deliveredUnpaidCount,
+            CompletedCount = completedCount,
+            CancelledCount = cancelledCount
+        };
+        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)request.PageSize);
+        return new OrderDeliveryBoardDto(items, summary, now)
+        {
+            TotalCount = totalCount,
+            Page = request.Page,
+            PageSize = request.PageSize,
+            TotalPages = totalPages
+        };
+    }
+
     public async Task<OrderDetailDto> GetAsync(Guid id, CancellationToken cancellationToken)
     {
         var order = await GetAggregateAsync(id, false, cancellationToken);
-        var detail = ToDetailDto(order);
+        var payments = await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => payment.OrderId == id)
+            .OrderByDescending(payment => payment.PaidAt)
+            .ThenByDescending(payment => payment.Id)
+            .ToListAsync(cancellationToken);
+        var detail = ToDetailDto(order, payments);
         return _inventoryService is null
             ? detail
             : detail with { Materials = await _inventoryService.GetOrderMaterialsAsync(id, cancellationToken) };
@@ -143,6 +335,7 @@ public sealed class OrderService : IOrderService
                 form.MaterialsSpecified ? IsolationLevel.Serializable : IsolationLevel.ReadCommitted,
                 cancellationToken);
             _dbContext.Orders.Add(order);
+            AddInitialPayment(form, order);
             try
             {
                 await _dbContext.SaveChangesAsync(cancellationToken);
@@ -206,6 +399,7 @@ public sealed class OrderService : IOrderService
             {
                 var order = await BuildOrderAsync(orderForm, uploadedUrls, cancellationToken);
                 _dbContext.Orders.Add(order);
+                AddInitialPayment(orderForm, order);
                 await _dbContext.SaveChangesAsync(cancellationToken);
                 if (orderForm.MaterialsSpecified)
                 {
@@ -271,6 +465,7 @@ public sealed class OrderService : IOrderService
         var actor = CurrentActor();
         var now = UtcNow();
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        await InvalidateOrderDateAsync(order, "Sửa đơn đã hoàn tất", cancellationToken);
         ApplyExpectedRowVersion(order, form.RowVersion);
         var snapshots = await ResolveSnapshotsAsync(
             form.Items,
@@ -369,15 +564,36 @@ public sealed class OrderService : IOrderService
 
     public async Task ChangeStatusAsync(Guid id, OrderStatus status, CancellationToken cancellationToken)
     {
+        _ = await ChangeStatusCoreAsync(id, status, null, null, false, cancellationToken);
+    }
+
+    public Task<OrderDetailDto> OverrideStatusAsync(
+        Guid id,
+        OverrideOrderStatusRequest request,
+        CancellationToken cancellationToken) =>
+        ChangeStatusCoreAsync(id, request.Status, request.RowVersion, request.Reason, true, cancellationToken);
+
+    private async Task<OrderDetailDto> ChangeStatusCoreAsync(
+        Guid id,
+        OrderStatus status,
+        string? rowVersion,
+        string? reason,
+        bool overrideTransition,
+        CancellationToken cancellationToken)
+    {
         ValidateEnum<OrderStatus>(status, nameof(status));
         var actor = CurrentActor();
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, rowVersion);
         if (order.OrderStatus == status)
         {
             await transaction.CommitAsync(cancellationToken);
-            return;
+            return await GetAsync(id, cancellationToken);
         }
+        await InvalidateOrderDateAsync(order, "Đổi trạng thái đơn hoàn tất", cancellationToken);
+        if (status == OrderStatus.Delivered && _financePeriodGuard is not null)
+            await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(UtcNow()), "Hoàn tất giao đơn", cancellationToken);
         var trackedChildren = CaptureTrackedChildren(order);
         var reserve = order.RequiresInventoryReservation(status);
         var restore = order.RequiresInventoryRestore(status);
@@ -419,7 +635,10 @@ public sealed class OrderService : IOrderService
 
         var now = UtcNow();
         await ApplyMaterialLifecycleAsync(order, status, actor.Id, now, cancellationToken);
-        order.ChangeStatus(status, inventoryReservedAfterTransition, now, actor.Id, actor.Name);
+        if (overrideTransition)
+            order.OverrideStatus(status, inventoryReservedAfterTransition, now, actor.Id, actor.Name, reason);
+        else
+            order.ChangeStatus(status, inventoryReservedAfterTransition, now, actor.Id, actor.Name, reason);
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -431,13 +650,97 @@ public sealed class OrderService : IOrderService
             await transaction.RollbackAsync(cancellationToken);
             throw new ConflictException("Đơn hàng hoặc tồn kho đã thay đổi bởi người khác, vui lòng tải lại.");
         }
+        return await GetAsync(id, cancellationToken);
     }
 
-    public async Task ReturnToPreviousStatusAsync(Guid id, CancellationToken cancellationToken)
+    public async Task<OrderDetailDto> RunWorkflowActionAsync(
+        Guid id,
+        string action,
+        OrderWorkflowCommand command,
+        CancellationToken cancellationToken)
+    {
+        var normalized = action.Trim().ToLowerInvariant();
+        var target = normalized switch
+        {
+            "confirm" => OrderStatus.Confirmed,
+            "prepare-order" => OrderStatus.Producing,
+            "start-preparation" => OrderStatus.Producing,
+            "ready" => OrderStatus.Ready,
+            "dispatch" => OrderStatus.Shipping,
+            "delivered" => OrderStatus.Delivered,
+            "delivery-failed" => OrderStatus.DeliveryFailed,
+            "retry-delivery" => OrderStatus.Ready,
+            "cancel" => OrderStatus.Cancelled,
+            _ => throw Validation(nameof(action), "Thao tác quy trình không hợp lệ.")
+        };
+        var marker = string.IsNullOrWhiteSpace(command.IdempotencyKey)
+            ? null
+            : $"[idempotency:{command.IdempotencyKey.Trim()}]";
+        if (marker is not null && await _dbContext.OrderChangeLogs.AsNoTracking()
+                .AnyAsync(log => log.OrderId == id && log.Note != null && log.Note.Contains(marker), cancellationToken))
+            return await GetAsync(id, cancellationToken);
+        var note = string.Join(Environment.NewLine, new[] { command.Reason?.Trim(), marker }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        return await ChangeStatusCoreAsync(id, target, command.RowVersion, string.IsNullOrWhiteSpace(note) ? null : note, false, cancellationToken);
+    }
+
+    public Task<OrderDetailDto> UpdateRecipientAsync(Guid id, UpdateOrderRecipientRequest request, CancellationToken cancellationToken) =>
+        UpdateAggregateAsync(id, request.RowVersion,
+            (order, now, actorId, actorName) => order.UpdateRecipient(request.RecipientName, request.RecipientPhone, request.DeliveryAddress, now, actorId, actorName),
+            cancellationToken);
+
+    public Task<OrderDetailDto> UpdateAssignmentAsync(Guid id, UpdateOrderAssignmentRequest request, CancellationToken cancellationToken) =>
+        UpdateAggregateAsync(id, request.RowVersion,
+            (order, now, actorId, actorName) => order.UpdateAssignment(request.AssigneeId, request.AssigneeName, request.PreparationDate, now, actorId, actorName),
+            cancellationToken);
+
+    public Task<OrderDetailDto> UpdateChecklistAsync(Guid id, UpdateOrderChecklistRequest request, CancellationToken cancellationToken) =>
+        UpdateAggregateAsync(id, request.RowVersion,
+            (order, now, actorId, actorName) => order.UpdateChecklist(request.DesignConfirmed, request.MaterialsPrepared, request.CardPrepared, request.QualityChecked, now, actorId, actorName),
+            cancellationToken);
+
+    public Task<OrderDetailDto> HoldAsync(Guid id, HoldOrderRequest request, CancellationToken cancellationToken) =>
+        UpdateAggregateAsync(id, request.RowVersion,
+            (order, now, actorId, actorName) => order.Hold(request.Reason, now, actorId, actorName),
+            cancellationToken);
+
+    public Task<OrderDetailDto> ResumeAsync(Guid id, ResumeOrderRequest request, CancellationToken cancellationToken) =>
+        UpdateAggregateAsync(id, request.RowVersion,
+            (order, now, actorId, actorName) => order.Resume(now, actorId, actorName),
+            cancellationToken);
+
+    private async Task<OrderDetailDto> UpdateAggregateAsync(
+        Guid id,
+        string? rowVersion,
+        Action<Order, DateTime, Guid?, string?> mutate,
+        CancellationToken cancellationToken)
+    {
+        var actor = CurrentActor();
+        var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, rowVersion);
+        var trackedChildren = CaptureTrackedChildren(order);
+        mutate(order, UtcNow(), actor.Id, actor.Name);
+        TrackAddedChildren(order, trackedChildren);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new ConflictException("Đơn hàng đã được cập nhật ở phiên khác. Vui lòng tải lại trước khi thao tác tiếp.");
+        }
+        return await GetAsync(id, cancellationToken);
+    }
+
+    public async Task ReturnToPreviousStatusAsync(
+        Guid id,
+        ReturnOrderToPreviousStatusRequest request,
+        CancellationToken cancellationToken)
     {
         var actor = CurrentActor();
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, request.RowVersion);
+        await InvalidateOrderDateAsync(order, "Trả lại trạng thái đơn", cancellationToken);
         var target = order.PreviousStatus
             ?? throw new ConflictException("Trạng thái hiện tại không thể trả về bước xử lý trước đó.");
         var trackedChildren = CaptureTrackedChildren(order);
@@ -475,6 +778,145 @@ public sealed class OrderService : IOrderService
         }
     }
 
+    public async Task<IReadOnlyList<OrderPaymentDto>> ListPaymentsAsync(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        if (!await _dbContext.Orders.AsNoTracking().AnyAsync(order => order.Id == id, cancellationToken))
+            throw new NotFoundException(nameof(Order), id);
+        return await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => payment.OrderId == id)
+            .OrderByDescending(payment => payment.PaidAt)
+            .ThenByDescending(payment => payment.Id)
+            .Select(payment => new OrderPaymentDto(
+                payment.Id,
+                payment.OrderId,
+                payment.Amount,
+                payment.Kind,
+                payment.Method,
+                UtcOffset(payment.PaidAt),
+                payment.Status,
+                payment.Note,
+                payment.AffectsRecognizedRevenue,
+                payment.ProductRevenueAdjustment,
+                payment.ShippingRevenueAdjustment))
+            .ToListAsync(cancellationToken);
+    }
+
+    public async Task<OrderPaymentDto> AddPaymentAsync(
+        Guid id,
+        CreateOrderPaymentRequest request,
+        CancellationToken cancellationToken)
+    {
+        ValidateEnum<OrderPaymentKind>(request.Kind, nameof(request.Kind));
+        ValidateEnum<PaymentMethod>(request.Method, nameof(request.Method));
+        var existing = await _dbContext.OrderPayments.AsNoTracking()
+            .SingleOrDefaultAsync(payment => payment.IdempotencyKey == request.IdempotencyKey, cancellationToken);
+        if (existing is not null)
+        {
+            if (existing.OrderId != id)
+                throw new ConflictException("Mã xác nhận thanh toán đã được dùng cho giao dịch khác.");
+            if (existing.Amount != request.Amount
+                || existing.Kind != request.Kind
+                || existing.Method != request.Method
+                || existing.PaidAt != request.PaidAt.UtcDateTime
+                || existing.AffectsRecognizedRevenue != request.AffectsRecognizedRevenue
+                || existing.ProductRevenueAdjustment != request.ProductRevenueAdjustment
+                || existing.ShippingRevenueAdjustment != request.ShippingRevenueAdjustment)
+                throw new ConflictException("Mã xác nhận thanh toán đã tồn tại nhưng nội dung giao dịch không khớp.");
+            return ToPaymentDto(existing);
+        }
+
+        var order = await GetAggregateAsync(id, true, cancellationToken);
+        var trackedChildren = CaptureTrackedChildren(order);
+        if (order.OrderStatus == OrderStatus.Cancelled)
+            throw new ConflictException("Không thể ghi nhận thanh toán cho đơn đã hủy.");
+        var succeeded = await _dbContext.OrderPayments
+            .Where(payment => payment.OrderId == id && payment.Status == PaymentTransactionStatus.Succeeded)
+            .ToListAsync(cancellationToken);
+        var currentNet = succeeded.Sum(payment => payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount);
+        var nextNet = currentNet + (request.Kind == OrderPaymentKind.Refund ? -request.Amount : request.Amount);
+        if (nextNet < 0)
+            throw Validation(nameof(request.Amount), "Số tiền hoàn không thể lớn hơn số tiền đã nhận.");
+        if (request.Kind != OrderPaymentKind.Refund && nextNet > order.TotalAmount)
+            throw Validation(nameof(request.Amount), "Số tiền nhận vượt quá số còn phải thu.");
+
+        var actor = CurrentActor();
+        var now = UtcNow();
+        var payment = new OrderPayment(
+            id,
+            request.Amount,
+            request.Kind,
+            request.Method,
+            request.PaidAt.UtcDateTime,
+            request.IdempotencyKey,
+            request.Note,
+            now,
+            actor.Id,
+            request.AffectsRecognizedRevenue,
+            request.ProductRevenueAdjustment,
+            request.ShippingRevenueAdjustment);
+        if (_financePeriodGuard is not null)
+            await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(request.PaidAt.UtcDateTime), "Giao dịch thu/hoàn tiền đơn hàng", cancellationToken);
+        _dbContext.OrderPayments.Add(payment);
+
+        var targetStatus = nextNet <= 0
+            ? PaymentStatus.Unpaid
+            : nextNet >= order.TotalAmount ? PaymentStatus.Paid : PaymentStatus.Deposited;
+        if (targetStatus != order.PaymentStatus)
+            order.ReconcilePaymentStatus(
+                targetStatus,
+                now,
+                actor.Id,
+                actor.Name,
+                targetStatus == PaymentStatus.Paid ? request.PaidAt.UtcDateTime : null,
+                "Cập nhật từ giao dịch thu/hoàn tiền thực tế.");
+        TrackAddedChildren(order, trackedChildren);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            var duplicate = await _dbContext.OrderPayments.AsNoTracking()
+                .SingleOrDefaultAsync(item => item.IdempotencyKey == request.IdempotencyKey, cancellationToken);
+            if (duplicate is not null && duplicate.OrderId == id)
+                return ToPaymentDto(duplicate);
+            throw new ConflictException("Giao dịch bị trùng hoặc dữ liệu thanh toán đã thay đổi. Vui lòng tải lại.");
+        }
+        return ToPaymentDto(payment);
+    }
+
+    public async Task ChangePaymentStatusAsync(
+        Guid id,
+        ChangePaymentStatusRequest request,
+        CancellationToken cancellationToken)
+    {
+        ValidateEnum<PaymentStatus>(request.Status, nameof(request.Status));
+        if (request.Status == PaymentStatus.Unpaid)
+            throw Validation(nameof(request.Status), "Không thể xóa lịch sử thu tiền bằng cách đổi trạng thái.");
+        if (!request.PaidAt.HasValue || !request.Method.HasValue || string.IsNullOrWhiteSpace(request.IdempotencyKey))
+            throw Validation(nameof(request.PaidAt), "Cần xác nhận số tiền, thời điểm nhận, phương thức và mã chống trùng.");
+
+        var order = await _dbContext.Orders.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
+            ?? throw new NotFoundException(nameof(Order), id);
+        var paid = await NetPaidAsync(id, cancellationToken);
+        var amount = request.Amount ?? (request.Status == PaymentStatus.Paid ? order.TotalAmount - paid : 0);
+        if (amount <= 0)
+            throw Validation(nameof(request.Amount), "Số tiền nhận thêm phải lớn hơn 0.");
+        var kind = request.Status == PaymentStatus.Paid
+            ? paid > 0 ? OrderPaymentKind.Remainder : OrderPaymentKind.Full
+            : OrderPaymentKind.Deposit;
+        await AddPaymentAsync(id, new CreateOrderPaymentRequest(
+            amount,
+            kind,
+            request.Method.Value,
+            request.PaidAt.Value,
+            request.IdempotencyKey!,
+            request.Note), cancellationToken);
+    }
+
+    [Obsolete("Use the transaction-backed overload so an actual received time is persisted.")]
     public async Task ChangePaymentStatusAsync(
         Guid id,
         PaymentStatus status,
@@ -484,7 +926,7 @@ public sealed class OrderService : IOrderService
         var actor = CurrentActor();
         var order = await GetAggregateAsync(id, true, cancellationToken);
         var trackedChildren = CaptureTrackedChildren(order);
-        order.ChangePaymentStatus(status, UtcNow(), actor.Id, actor.Name);
+        order.ChangePaymentStatus(status, UtcNow(), actor.Id, actor.Name, "Legacy status-only update; payment history requires supplementation.");
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -498,13 +940,31 @@ public sealed class OrderService : IOrderService
 
     public async Task UpdateShippingFeeActualAsync(
         Guid id,
-        decimal? shippingFeeActual,
+        UpdateShippingFeeActualRequest request,
         CancellationToken cancellationToken)
     {
         var actor = CurrentActor();
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        ApplyExpectedRowVersion(order, request.RowVersion);
+        if (_financePeriodGuard is not null)
+        {
+            if (order.ShippingFeeIncurredAt.HasValue)
+                await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(order.ShippingFeeIncurredAt.Value), "Sửa phí giao hàng", cancellationToken);
+            if (request.IncurredAt.HasValue)
+                await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(request.IncurredAt.Value.UtcDateTime), "Sửa phí giao hàng", cancellationToken);
+            if (request.PaidAt.HasValue)
+                await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(request.PaidAt.Value.UtcDateTime), "Thanh toán phí giao hàng", cancellationToken);
+        }
         var trackedChildren = CaptureTrackedChildren(order);
-        order.UpdateShippingFeeActual(shippingFeeActual, UtcNow(), actor.Id, actor.Name);
+        order.UpdateShippingFeeActual(
+            request.ShippingFeeActual,
+            UtcNow(),
+            actor.Id,
+            actor.Name,
+            request.IncurredAt?.UtcDateTime,
+            request.PaidAt?.UtcDateTime,
+            request.Method,
+            request.IdempotencyKey);
         TrackAddedChildren(order, trackedChildren);
         try
         {
@@ -520,9 +980,10 @@ public sealed class OrderService : IOrderService
     {
         await using var transaction = await _dbContext.Database.BeginTransactionAsync(cancellationToken);
         var order = await GetAggregateAsync(id, true, cancellationToken);
+        await InvalidateOrderDateAsync(order, "Xóa đơn hàng", cancellationToken);
         var imageUrls = order.Images.Select(image => image.ImageUrl).ToList();
 
-        if (order.InventoryReserved && order.OrderStatus is OrderStatus.Producing or OrderStatus.Shipping)
+        if (order.InventoryReserved)
         {
             var quantities = order.Items
                 .Where(item => item.ProductId.HasValue)
@@ -565,16 +1026,19 @@ public sealed class OrderService : IOrderService
     {
         var (fromUtc, toUtc) = BusinessDayUtc(date);
         var orders = await _dbContext.Orders.AsNoTracking()
-            .Where(order => order.DeliveryAt >= fromUtc && order.DeliveryAt < toUtc)
+            .Where(order => (order.DeliveryAt >= fromUtc && order.DeliveryAt < toUtc) || order.PreparationDate == date)
             .OrderBy(order => order.DeliveryAt)
             .ToListAsync(cancellationToken);
         return orders.Select(order => new OrderCalendarItemDto(
             order.Id,
             order.OrderCode,
+            order.OrdererName,
+            order.OrdererPhone,
             order.RecipientName,
             order.RecipientPhone,
             UtcOffset(order.DeliveryAt),
             UtcOffset(order.DeliveryTo),
+            order.PreparationDate,
             order.PickupAtShop,
             order.ProvinceShipping,
             order.DeliveryAddress,
@@ -599,7 +1063,7 @@ public sealed class OrderService : IOrderService
         return orders.Select(order => new OrderDeliveryLocationDto(
             order.Id,
             order.OrderCode,
-            order.RecipientName,
+            order.RecipientName ?? string.Empty,
             order.DeliveryAddress,
             order.DeliveryLatitude!.Value,
             order.DeliveryLongitude!.Value,
@@ -660,6 +1124,42 @@ public sealed class OrderService : IOrderService
             order.AddImage(orderItem.Id, url, image.SortOrder);
         }
         return order;
+    }
+
+    private void AddInitialPayment(CreateOrderForm form, Order order)
+    {
+        if (form.IsPaid && !form.ConfirmPaymentReceived)
+            throw Validation(nameof(form.ConfirmPaymentReceived), "Cần xác nhận đã thực nhận tiền trước khi đánh dấu đã thanh toán.");
+        if (!form.ConfirmPaymentReceived) return;
+
+        var amount = form.IsPaid ? order.TotalAmount : order.DepositAmount;
+        if (amount <= 0)
+            throw Validation(nameof(form.DepositAmount), "Số tiền đã nhận phải lớn hơn 0.");
+        if (!form.PaymentMethod.HasValue)
+            throw Validation(nameof(form.PaymentMethod), "Vui lòng chọn phương thức nhận tiền.");
+        ValidateEnum<PaymentMethod>(form.PaymentMethod.Value, nameof(form.PaymentMethod));
+
+        var actor = CurrentActor();
+        var now = UtcNow();
+        var payment = new OrderPayment(
+            order.Id,
+            amount,
+            form.IsPaid ? OrderPaymentKind.Full : OrderPaymentKind.Deposit,
+            form.PaymentMethod.Value,
+            form.PaymentReceivedAt?.UtcDateTime ?? now,
+            string.IsNullOrWhiteSpace(form.PaymentIdempotencyKey)
+                ? $"order-create-{order.Id:N}"
+                : form.PaymentIdempotencyKey,
+            "Ghi nhận khi tạo đơn",
+            now,
+            actor.Id);
+        _dbContext.OrderPayments.Add(payment);
+        order.ChangePaymentStatus(
+            form.IsPaid ? PaymentStatus.Paid : PaymentStatus.Deposited,
+            now,
+            actor.Id,
+            actor.Name,
+            "Ghi nhận giao dịch thu tiền khi tạo đơn.");
     }
 
     private async Task<Order> GetAggregateAsync(Guid id, bool tracked, CancellationToken cancellationToken)
@@ -1183,7 +1683,12 @@ public sealed class OrderService : IOrderService
         form.SenderName ?? string.Empty,
         form.SenderPhone ?? string.Empty);
 
-    internal static OrderListItemDto ToListDto(Order order) => new(
+    internal static OrderListItemDto ToListDto(
+        Order order,
+        decimal paidAmount = 0,
+        int paymentCount = 0,
+        string? channelName = null,
+        DateTime? nowUtc = null) => new(
         order.Id,
         order.OrderCode,
         order.OrdererName,
@@ -1213,9 +1718,36 @@ public sealed class OrderService : IOrderService
         ?? order.Images
             .OrderBy(image => image.SortOrder)
             .Select(image => image.ImageUrl)
-            .FirstOrDefault());
+            .FirstOrDefault())
+    {
+        ProductSummary = string.Join(", ", order.Items
+            .OrderBy(item => item.Id)
+            .Select(item => item.ProductName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Take(2)),
+        PaidAmount = paidAmount,
+        RemainingAmount = Math.Max(0, order.TotalAmount - paidAmount),
+        PaymentHistoryIncomplete = paymentCount == 0 && order.PaymentStatus != PaymentStatus.Unpaid,
+        CompletedAt = UtcOffset(order.CompletedAt),
+        ChannelName = channelName,
+        DeliveredAt = UtcOffset(order.DeliveredAt),
+        PaidInFullAt = UtcOffset(order.PaidInFullAt),
+        PreparationDate = order.PreparationDate,
+        AssigneeId = order.AssigneeId,
+        AssigneeName = order.AssigneeName,
+        HoldReason = order.HoldReason,
+        HoldAt = UtcOffset(order.HoldAt),
+        FulfillmentType = order.PickupAtShop ? "pickup" : order.ProvinceShipping ? "province-delivery" : "local-delivery",
+        TrackingGroup = TrackingGroup(order, nowUtc ?? DateTime.UtcNow),
+        QuantityTotal = order.Items.Sum(item => item.Quantity),
+        HasCard = order.Items.Any(item => item.HasCard),
+        CardMessage = string.Join(Environment.NewLine, order.Items.Where(item => item.HasCard && !string.IsNullOrWhiteSpace(item.CardMessage)).Select(item => item.CardMessage)),
+        HasBanner = order.Items.Any(item => item.HasBanner),
+        BannerMessage = string.Join(Environment.NewLine, order.Items.Where(item => item.HasBanner && !string.IsNullOrWhiteSpace(item.BannerMessage)).Select(item => item.BannerMessage)),
+        RowVersion = order.RowVersion.Length == 0 ? null : Convert.ToBase64String(order.RowVersion)
+    };
 
-    private static OrderDetailDto ToDetailDto(Order order) => new(
+    private static OrderDetailDto ToDetailDto(Order order, IReadOnlyCollection<OrderPayment>? payments = null) => new(
         order.Id,
         order.OrderCode,
         order.OrdererName,
@@ -1311,8 +1843,58 @@ public sealed class OrderService : IOrderService
     {
         CustomerId = order.CustomerId,
         SenderName = order.SenderName,
-        SenderPhone = order.SenderPhone
+        SenderPhone = order.SenderPhone,
+        PaidAmount = NetPaid(payments ?? []),
+        RemainingAmount = Math.Max(0, order.TotalAmount - NetPaid(payments ?? [])),
+        PaymentHistoryIncomplete = (payments?.Count ?? 0) == 0 && order.PaymentStatus != PaymentStatus.Unpaid,
+        Payments = (payments ?? []).Select(ToPaymentDto).ToList(),
+        CompletedAt = UtcOffset(order.CompletedAt),
+        ShippingFeeIncurredAt = UtcOffset(order.ShippingFeeIncurredAt),
+        ShippingFeePaidAt = UtcOffset(order.ShippingFeePaidAt),
+        ShippingFeePaymentMethod = order.ShippingFeePaymentMethod,
+        DeliveredAt = UtcOffset(order.DeliveredAt),
+        PaidInFullAt = UtcOffset(order.PaidInFullAt),
+        PreparationDate = order.PreparationDate,
+        AssigneeId = order.AssigneeId,
+        AssigneeName = order.AssigneeName,
+        HoldReason = order.HoldReason,
+        HoldAt = UtcOffset(order.HoldAt),
+        Checklist = new OrderChecklistDto(order.DesignConfirmed, order.MaterialsPrepared, order.CardPrepared, order.QualityChecked),
+        CancelledReason = order.CancelledReason
     };
+
+    private static string TrackingGroup(Order order, DateTime nowUtc)
+    {
+        if (order.OrderStatus == OrderStatus.Cancelled) return "cancelled";
+        if (order.OrderStatus == OrderStatus.Completed) return "completed";
+        if (order.OrderStatus == OrderStatus.Delivered && order.PaymentStatus != PaymentStatus.Paid) return "delivered-unpaid";
+        if (order.DeliveryAt < nowUtc) return "late";
+        var localDelivery = TimeZoneInfo.ConvertTimeFromUtc(order.DeliveryAt, BusinessTimeZone).Date;
+        var localNow = TimeZoneInfo.ConvertTimeFromUtc(nowUtc, BusinessTimeZone).Date;
+        return localDelivery == localNow ? "today" : "upcoming";
+    }
+
+    private static IQueryable<Order> ApplyFulfillmentFilter(IQueryable<Order> query, string? fulfillmentType)
+    {
+        if (string.IsNullOrWhiteSpace(fulfillmentType)) return query;
+        return fulfillmentType.Trim().ToLowerInvariant() switch
+        {
+            "pickup" => query.Where(order => order.PickupAtShop),
+            "local-delivery" => query.Where(order => !order.PickupAtShop && !order.ProvinceShipping),
+            "province-delivery" => query.Where(order => !order.PickupAtShop && order.ProvinceShipping),
+            _ => throw Validation(nameof(OrderListQuery.FulfillmentType), "Cách nhận hàng không hợp lệ.")
+        };
+    }
+
+    private async Task<Dictionary<Guid, string>> ChannelNamesAsync(IEnumerable<Guid> channelIds, CancellationToken cancellationToken)
+    {
+        var ids = channelIds.Distinct().ToArray();
+        return ids.Length == 0
+            ? []
+            : await _dbContext.Channels.AsNoTracking()
+                .Where(channel => ids.Contains(channel.Id))
+                .ToDictionaryAsync(channel => channel.Id, channel => channel.Name, cancellationToken);
+    }
 
     private static IQueryable<Order> ApplyDateRange(
         IQueryable<Order> query,
@@ -1369,6 +1951,57 @@ public sealed class OrderService : IOrderService
     private static DateTimeOffset? UtcOffset(DateTime? value) =>
         value.HasValue ? UtcOffset(value.Value) : null;
 
+    private static DateTime BusinessStartUtc(DateOnly date)
+    {
+        var local = DateTime.SpecifyKind(date.ToDateTime(TimeOnly.MinValue), DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(local, BusinessTimeZone);
+    }
+
+    private async Task<Dictionary<Guid, PaymentTotal>> PaymentTotalsAsync(
+        IEnumerable<Guid> orderIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = orderIds.Distinct().ToArray();
+        if (ids.Length == 0) return new Dictionary<Guid, PaymentTotal>();
+        var rows = await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => ids.Contains(payment.OrderId)
+                && payment.Status == PaymentTransactionStatus.Succeeded)
+            .GroupBy(payment => payment.OrderId)
+            .Select(group => new
+            {
+                OrderId = group.Key,
+                Amount = group.Sum(payment => payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount),
+                Count = group.Count()
+            })
+            .ToListAsync(cancellationToken);
+        return rows.ToDictionary(row => row.OrderId, row => new PaymentTotal(row.Amount, row.Count));
+    }
+
+    private async Task<decimal> NetPaidAsync(Guid orderId, CancellationToken cancellationToken) =>
+        await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => payment.OrderId == orderId
+                && payment.Status == PaymentTransactionStatus.Succeeded)
+            .SumAsync(payment => payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount, cancellationToken);
+
+    private static decimal NetPaid(IEnumerable<OrderPayment> payments) =>
+        payments.Where(payment => payment.Status == PaymentTransactionStatus.Succeeded)
+            .Sum(payment => payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount);
+
+    private static OrderPaymentDto ToPaymentDto(OrderPayment payment) => new(
+        payment.Id,
+        payment.OrderId,
+        payment.Amount,
+        payment.Kind,
+        payment.Method,
+        UtcOffset(payment.PaidAt),
+        payment.Status,
+        payment.Note,
+        payment.AffectsRecognizedRevenue,
+        payment.ProductRevenueAdjustment,
+        payment.ShippingRevenueAdjustment);
+
+    private readonly record struct PaymentTotal(decimal Amount, int Count);
+
     private (Guid? Id, string? Name) CurrentActor()
     {
         var principal = _httpContextAccessor.HttpContext?.User;
@@ -1377,6 +2010,16 @@ public sealed class OrderService : IOrderService
             Guid.TryParse(subject, out var id) ? id : null,
             principal?.FindFirstValue("unique_name") ?? principal?.Identity?.Name);
     }
+
+    private async Task InvalidateOrderDateAsync(Order order, string reason, CancellationToken cancellationToken)
+    {
+        if (_financePeriodGuard is not null && order.DeliveredAt.HasValue
+            && order.OrderStatus is OrderStatus.Delivered or OrderStatus.Completed)
+            await _financePeriodGuard.InvalidateAsync(LocalBusinessDate(order.DeliveredAt.Value), reason, cancellationToken);
+    }
+
+    private static DateOnly LocalBusinessDate(DateTime utc) =>
+        DateOnly.FromDateTime(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), BusinessTimeZone));
 
     private DateTime UtcNow() => _timeProvider.GetUtcNow().UtcDateTime;
 
@@ -1461,9 +2104,10 @@ public sealed class OrderService : IOrderService
         DateTime now,
         CancellationToken cancellationToken)
     {
-        var targetIsCommit = order.OrderStatus == OrderStatus.Created && targetStatus == OrderStatus.Producing;
-        var targetIsRestore = targetStatus == OrderStatus.Cancelled
-            || (order.OrderStatus == OrderStatus.Producing && targetStatus == OrderStatus.Created);
+        var targetIsCommit = (order.OrderStatus is OrderStatus.Created or OrderStatus.Confirmed)
+            && (targetStatus is OrderStatus.Producing or OrderStatus.Ready or OrderStatus.Shipping or OrderStatus.Delivered or OrderStatus.DeliveryFailed);
+        var targetIsRestore = (targetStatus is OrderStatus.Created or OrderStatus.Confirmed or OrderStatus.Cancelled)
+            && order.OrderStatus is not (OrderStatus.Created or OrderStatus.Confirmed or OrderStatus.Cancelled);
         if (!targetIsCommit && !targetIsRestore)
             return;
 

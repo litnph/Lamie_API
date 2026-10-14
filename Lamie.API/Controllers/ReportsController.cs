@@ -27,6 +27,12 @@ public sealed class ReportsController : ControllerBase
         CancellationToken cancellationToken) =>
         _financialReportService.GetAsync(query, cancellationToken);
 
+    [HttpGet("cash-flow")]
+    public Task<CashFlowReportDto> CashFlow(
+        [FromQuery] FinancialReportQuery query,
+        CancellationToken cancellationToken) =>
+        _financialReportService.GetCashFlowAsync(query, cancellationToken);
+
     [HttpGet("financial/export/excel")]
     public async Task<IActionResult> ExportExcel(
         [FromQuery] FinancialReportQuery query,

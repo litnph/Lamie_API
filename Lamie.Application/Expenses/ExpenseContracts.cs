@@ -1,4 +1,9 @@
+using Lamie.Domain.Entities;
+
 namespace Lamie.Application.Expenses;
+
+public sealed record ExpensePaymentDto(Guid Id, decimal Amount, DateTimeOffset PaidAt,
+    PaymentMethod Method, PaymentTransactionStatus Status, string? Note);
 
 public sealed record ExpenseCategoryDto(
     Guid Id,
@@ -31,21 +36,36 @@ public sealed record ExpenseDto(
     string? Notes,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    Guid? StockReceiptId = null);
+    Guid? StockReceiptId = null,
+    DateTimeOffset? PaidAt = null,
+    PaymentMethod? PaymentMethod = null,
+    string? Vendor = null,
+    bool PaymentHistoryIncomplete = false,
+    decimal PaidAmount = 0,
+    decimal OutstandingAmount = 0,
+    IReadOnlyList<ExpensePaymentDto>? Payments = null);
 
 public sealed record CreateExpenseRequest(
     Guid ExpenseCategoryId,
     DateOnly ExpenseDate,
     decimal Amount,
     string Description,
-    string? Notes);
+    string? Notes,
+    DateTimeOffset? PaidAt = null,
+    PaymentMethod? PaymentMethod = null,
+    string? Vendor = null,
+    string? PaymentIdempotencyKey = null);
 
 public sealed record UpdateExpenseRequest(
     Guid ExpenseCategoryId,
     DateOnly ExpenseDate,
     decimal Amount,
     string Description,
-    string? Notes);
+    string? Notes,
+    DateTimeOffset? PaidAt = null,
+    PaymentMethod? PaymentMethod = null,
+    string? Vendor = null,
+    string? PaymentIdempotencyKey = null);
 
 public sealed class ExpenseListQuery
 {

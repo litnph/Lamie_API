@@ -331,6 +331,7 @@ public sealed class IngredientPlanningTests
                     null, null, "End bouquet", null, 100, 3,
                     IngredientRecipe: [Recipe(10)],
                     IngredientSnapshotCapturedAtUtc: Baseline));
+            second.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddSeconds(30), null, "tester");
             second.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(1), null, "tester");
             var legacyWithoutSnapshot = CreateOrder(
                 "ORD-DEMAND-LEGACY",
@@ -344,7 +345,7 @@ public sealed class IngredientPlanningTests
                     null, null, "Cancelled bouquet", null, 100, 100,
                     IngredientRecipe: [Recipe(20)],
                     IngredientSnapshotCapturedAtUtc: Baseline));
-            cancelled.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(1), null, "tester");
+            cancelled.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(1), null, "tester", "Khách hủy");
             dbContext.Orders.AddRange(first, legacyWithoutSnapshot, second, cancelled);
             await dbContext.SaveChangesAsync();
 

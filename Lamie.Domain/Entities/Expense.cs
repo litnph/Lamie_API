@@ -17,11 +17,16 @@ public sealed class Expense
         string description,
         string? notes,
         DateTime nowUtc,
-        Guid? stockReceiptId = null)
+        Guid? stockReceiptId = null,
+        DateTime? paidAtUtc = null,
+        PaymentMethod? paymentMethod = null,
+        string? vendor = null,
+        string? paymentIdempotencyKey = null)
     {
         Id = Guid.NewGuid();
         StockReceiptId = stockReceiptId;
-        Update(expenseCategoryId, expenseDate, amount, description, notes, nowUtc);
+        Update(expenseCategoryId, expenseDate, amount, description, notes, nowUtc,
+            paidAtUtc, paymentMethod, vendor, paymentIdempotencyKey);
         CreatedAt = nowUtc;
     }
 
@@ -32,6 +37,11 @@ public sealed class Expense
     public string Description { get; private set; } = string.Empty;
     public string? Notes { get; private set; }
     public Guid? StockReceiptId { get; private set; }
+    public DateTime? PaidAt { get; private set; }
+    public PaymentMethod? PaymentMethod { get; private set; }
+    public string? Vendor { get; private set; }
+    public string? PaymentIdempotencyKey { get; private set; }
+    public bool PaymentHistoryIncomplete { get; private set; }
     public DateTime CreatedAt { get; private set; }
     public DateTime UpdatedAt { get; private set; }
 
@@ -41,7 +51,11 @@ public sealed class Expense
         decimal amount,
         string description,
         string? notes,
-        DateTime nowUtc)
+        DateTime nowUtc,
+        DateTime? paidAtUtc = null,
+        PaymentMethod? paymentMethod = null,
+        string? vendor = null,
+        string? paymentIdempotencyKey = null)
     {
         if (expenseCategoryId == Guid.Empty)
             throw new DomainException("Expense category is required.");
@@ -57,12 +71,28 @@ public sealed class Expense
             throw new DomainException("Expense description is required.");
         if (description.Trim().Length > 500)
             throw new DomainException("Expense description cannot exceed 500 characters.");
+        if (paidAtUtc.HasValue && paidAtUtc.Value.Kind != DateTimeKind.Utc)
+            throw new DomainException("Expense paid time must be UTC.");
+        if (paidAtUtc.HasValue != paymentMethod.HasValue)
+            throw new DomainException("Paid time and payment method must be supplied together.");
+        if (paymentMethod.HasValue && !Enum.IsDefined(paymentMethod.Value))
+            throw new DomainException("Expense payment method is invalid.");
+        if (!string.IsNullOrWhiteSpace(paymentIdempotencyKey) && !paidAtUtc.HasValue)
+            throw new DomainException("Expense payment key requires a paid time.");
 
         ExpenseCategoryId = expenseCategoryId;
         ExpenseDate = expenseDate;
         Amount = amount;
         Description = description.Trim();
         Notes = NormalizeOptional(notes, 2000, "Expense notes");
+        var normalizedPaymentKey = NormalizeOptional(paymentIdempotencyKey, 100, "Expense payment idempotency key")
+            ?? (paidAtUtc.HasValue ? PaymentIdempotencyKey : null);
+        PaidAt = paidAtUtc;
+        PaymentMethod = paymentMethod;
+        Vendor = NormalizeOptional(vendor, 200, "Expense vendor");
+        PaymentIdempotencyKey = normalizedPaymentKey;
+        if (paidAtUtc.HasValue)
+            PaymentHistoryIncomplete = false;
         UpdatedAt = nowUtc;
     }
 

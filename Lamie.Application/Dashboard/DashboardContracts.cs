@@ -88,4 +88,42 @@ public sealed record DashboardDto(
     DashboardActiveOrdersDto? ActiveOrders,
     DashboardRevenueDto? Revenue,
     DashboardInventoryDto? Inventory,
-    IReadOnlyList<DashboardSourceErrorDto> SourceErrors);
+    IReadOnlyList<DashboardSourceErrorDto> SourceErrors)
+{
+    public DashboardV2Dto? V2 { get; init; }
+}
+
+public sealed record DashboardDeliveryDayDto(
+    DateOnly Date,
+    int OrderCount);
+
+public sealed record DashboardUpcomingDto(
+    DateOnly From,
+    DateOnly To,
+    int OrderCount,
+    int AttentionCount,
+    decimal OrderValue,
+    decimal PaidAmount,
+    decimal RemainingAmount,
+    int OverdueBeforeTodayCount,
+    IReadOnlyList<DashboardDeliveryDayDto> Days,
+    IReadOnlyList<OrderListItemDto> NextOrders);
+
+public sealed record DashboardTodayFinanceDto(
+    DateOnly Date,
+    int CompletedOrderCount,
+    decimal ProductRevenue,
+    decimal ShippingRevenue,
+    decimal Revenue,
+    decimal CashIn,
+    decimal CashOut,
+    decimal NetCash,
+    decimal Deposits,
+    decimal Remainders,
+    decimal ShippingPaid,
+    decimal OtherExpensesPaid,
+    int IncompleteHistoryCount);
+
+public sealed record DashboardV2Dto(
+    DashboardUpcomingDto Upcoming,
+    DashboardTodayFinanceDto TodayFinance);

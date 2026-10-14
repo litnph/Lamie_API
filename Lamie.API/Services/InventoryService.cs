@@ -4,6 +4,7 @@ using Lamie.API.Models.Inventory;
 using Lamie.Application.Common.Exceptions;
 using Lamie.Application.Common.Storage;
 using Lamie.Application.Common.Uploads;
+using Lamie.Application.Finance;
 using Lamie.Application.Inventory;
 using Lamie.Domain.Entities;
 using Lamie.Domain.Exceptions;
@@ -18,17 +19,20 @@ public sealed class InventoryService : IInventoryService
     private readonly IFileStorage _fileStorage;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly TimeProvider _timeProvider;
+    private readonly IFinancePeriodGuard? _financePeriodGuard;
 
     public InventoryService(
         AppDbContext dbContext,
         IFileStorage fileStorage,
         IHttpContextAccessor httpContextAccessor,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IFinancePeriodGuard? financePeriodGuard = null)
     {
         _dbContext = dbContext;
         _fileStorage = fileStorage;
         _httpContextAccessor = httpContextAccessor;
         _timeProvider = timeProvider;
+        _financePeriodGuard = financePeriodGuard;
     }
 
     public async Task<PagedInventoryStockUnitsDto> ListStockUnitsAsync(
@@ -546,6 +550,8 @@ public sealed class InventoryService : IInventoryService
                 ?? throw new NotFoundException(nameof(ExpenseCategory), form.ExpenseCategoryId!.Value);
             if (!expenseCategory.IsActive)
                 throw new ConflictException("Expense category is inactive.");
+            if (_financePeriodGuard is not null)
+                await _financePeriodGuard.InvalidateAsync(form.ReceivedDate, "Nhập kho tạo chi phí vận hành", cancellationToken);
         }
 
         var stockUnitIds = form.Items.Select(item => item.StockUnitId).ToArray();

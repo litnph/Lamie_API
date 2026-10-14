@@ -12,6 +12,14 @@ namespace Lamie.Infrastructure.Persistence
         public DbSet<Product> Products => Set<Product>();
         public DbSet<ExpenseCategory> ExpenseCategories => Set<ExpenseCategory>();
         public DbSet<Expense> Expenses => Set<Expense>();
+        public DbSet<ExpensePayment> ExpensePayments => Set<ExpensePayment>();
+        public DbSet<OrderPayment> OrderPayments => Set<OrderPayment>();
+        public DbSet<MaterialPurchase> MaterialPurchases => Set<MaterialPurchase>();
+        public DbSet<MaterialPurchaseLine> MaterialPurchaseLines => Set<MaterialPurchaseLine>();
+        public DbSet<MaterialPurchasePayment> MaterialPurchasePayments => Set<MaterialPurchasePayment>();
+        public DbSet<FinancePeriod> FinancePeriods => Set<FinancePeriod>();
+        public DbSet<MaterialStocktakeLine> MaterialStocktakeLines => Set<MaterialStocktakeLine>();
+        public DbSet<FinancePeriodEvent> FinancePeriodEvents => Set<FinancePeriodEvent>();
         public DbSet<Channel> Channels => Set<Channel>();
         public DbSet<Customer> Customers => Set<Customer>();
         public DbSet<Order> Orders => Set<Order>();
@@ -119,11 +127,119 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.Amount).HasPrecision(18, 2);
                 entity.Property(x => x.Description).HasMaxLength(500);
                 entity.Property(x => x.Notes).HasMaxLength(2000);
+                entity.Property(x => x.PaymentMethod).HasConversion<int>();
+                entity.Property(x => x.Vendor).HasMaxLength(200);
+                entity.Property(x => x.PaymentIdempotencyKey).HasMaxLength(100);
+                entity.Property(x => x.PaymentHistoryIncomplete).HasDefaultValue(false);
                 entity.HasIndex(x => x.ExpenseCategoryId);
                 entity.HasIndex(x => new { x.ExpenseDate, x.ExpenseCategoryId });
                 entity.HasIndex(x => x.StockReceiptId)
                     .IsUnique()
                     .HasFilter("[stock_receipt_id] IS NOT NULL");
+                entity.HasIndex(x => x.PaymentIdempotencyKey)
+                    .IsUnique()
+                    .HasFilter("[payment_idempotency_key] IS NOT NULL");
+                entity.HasIndex(x => x.PaidAt);
+            });
+
+            modelBuilder.Entity<OrderPayment>(entity =>
+            {
+                entity.ToTable("fin_order_payments");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Amount).HasPrecision(18, 2);
+                entity.Property(x => x.ProductRevenueAdjustment).HasPrecision(18, 2);
+                entity.Property(x => x.ShippingRevenueAdjustment).HasPrecision(18, 2);
+                entity.Property(x => x.AffectsRecognizedRevenue).HasDefaultValue(false);
+                entity.Property(x => x.Kind).HasConversion<int>();
+                entity.Property(x => x.Method).HasConversion<int>();
+                entity.Property(x => x.Status).HasConversion<int>();
+                entity.Property(x => x.IdempotencyKey).HasMaxLength(100);
+                entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.HasIndex(x => x.IdempotencyKey).IsUnique();
+                entity.HasIndex(x => new { x.OrderId, x.PaidAt });
+                entity.HasIndex(x => new { x.PaidAt, x.Status });
+                entity.HasOne<Order>()
+                    .WithMany()
+                    .HasForeignKey(x => x.OrderId)
+                    .OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne<User>()
+                    .WithMany()
+                    .HasForeignKey(x => x.CreatedById)
+                    .OnDelete(DeleteBehavior.Restrict);
+            });
+
+            ConfigurePayment<ExpensePayment>(modelBuilder, "fin_expense_payments", "ExpenseId");
+            ConfigurePayment<MaterialPurchasePayment>(modelBuilder, "fin_material_purchase_payments", "PurchaseId");
+            modelBuilder.Entity<ExpensePayment>()
+                .HasOne<Expense>().WithMany().HasForeignKey(x => x.ExpenseId).OnDelete(DeleteBehavior.Restrict);
+            modelBuilder.Entity<MaterialPurchasePayment>()
+                .HasOne<MaterialPurchase>().WithMany().HasForeignKey(x => x.PurchaseId).OnDelete(DeleteBehavior.Restrict);
+
+            modelBuilder.Entity<MaterialPurchase>(entity =>
+            {
+                entity.ToTable("fin_material_purchases");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.PurchaseDate).HasColumnType("date");
+                entity.Property(x => x.ReceivedDate).HasColumnType("date");
+                entity.Property(x => x.VendorName).HasMaxLength(200);
+                entity.Property(x => x.VendorAddress).HasMaxLength(500);
+                entity.Property(x => x.VendorTaxId).HasMaxLength(50);
+                entity.Property(x => x.DocumentStatus).HasConversion<int>();
+                entity.Property(x => x.TaxEligibilityStatus).HasConversion<int>();
+                entity.Property(x => x.DocumentReference).HasMaxLength(200);
+                entity.Property(x => x.AttachmentUrl).HasMaxLength(2048);
+                entity.Property(x => x.Notes).HasMaxLength(2000);
+                entity.HasIndex(x => x.ReceivedDate);
+                entity.HasIndex(x => new { x.DocumentStatus, x.ReceivedDate });
+            });
+
+            modelBuilder.Entity<MaterialPurchaseLine>(entity =>
+            {
+                entity.ToTable("fin_material_purchase_lines");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Group).HasConversion<int>();
+                entity.Property(x => x.Description).HasMaxLength(300);
+                entity.Property(x => x.Amount).HasPrecision(18, 2);
+                entity.HasIndex(x => new { x.PurchaseId, x.Group });
+                entity.HasOne<MaterialPurchase>().WithMany().HasForeignKey(x => x.PurchaseId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<FinancePeriod>(entity =>
+            {
+                entity.ToTable("fin_periods");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.From).HasColumnType("date");
+                entity.Property(x => x.To).HasColumnType("date");
+                entity.Property(x => x.OpeningCashBalance).HasPrecision(18, 2);
+                entity.Property(x => x.Status).HasConversion<int>();
+                entity.Property(x => x.RowVersion).IsRowVersion();
+                entity.HasIndex(x => new { x.From, x.To }).IsUnique();
+                entity.HasIndex(x => new { x.Status, x.From, x.To });
+            });
+
+            modelBuilder.Entity<MaterialStocktakeLine>(entity =>
+            {
+                entity.ToTable("fin_material_stocktake_lines");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Group).HasConversion<int>();
+                entity.Property(x => x.OpeningValue).HasPrecision(18, 2);
+                entity.Property(x => x.EndingValue).HasPrecision(18, 2);
+                entity.Property(x => x.WasteValue).HasPrecision(18, 2);
+                entity.Property(x => x.AdjustmentValue).HasPrecision(18, 2);
+                entity.Property(x => x.Note).HasMaxLength(1000);
+                entity.Property(x => x.Status).HasConversion<int>();
+                entity.HasIndex(x => new { x.PeriodId, x.Group }).IsUnique();
+                entity.HasOne<FinancePeriod>().WithMany().HasForeignKey(x => x.PeriodId).OnDelete(DeleteBehavior.Cascade);
+            });
+
+            modelBuilder.Entity<FinancePeriodEvent>(entity =>
+            {
+                entity.ToTable("fin_period_events");
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.Kind).HasConversion<int>();
+                entity.Property(x => x.Reason).HasMaxLength(1000);
+                entity.HasIndex(x => new { x.PeriodId, x.OccurredAt });
+                entity.HasOne<FinancePeriod>().WithMany().HasForeignKey(x => x.PeriodId).OnDelete(DeleteBehavior.Cascade);
             });
 
             modelBuilder.Entity<Channel>(entity =>
@@ -350,6 +466,8 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.DepositAmount).HasPrecision(18, 2);
                 entity.Property(x => x.ShippingFee).HasPrecision(18, 2);
                 entity.Property(x => x.ShippingFeeActual).HasPrecision(18, 2);
+                entity.Property(x => x.ShippingFeePaymentMethod).HasConversion<int>();
+                entity.Property(x => x.ShippingFeePaymentIdempotencyKey).HasMaxLength(100);
                 entity.Property(x => x.SubTotal).HasPrecision(18, 2);
                 entity.Property(x => x.DiscountTotal).HasPrecision(18, 2);
                 entity.Property(x => x.TotalAmount).HasPrecision(18, 2);
@@ -357,6 +475,10 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.OrderStatus).HasConversion<int>();
                 entity.Property(x => x.Description).HasMaxLength(4000);
                 entity.Property(x => x.ContentNote).HasMaxLength(4000);
+                entity.Property(x => x.AssigneeName).HasMaxLength(200);
+                entity.Property(x => x.CancelledReason).HasMaxLength(1000);
+                entity.Property(x => x.HoldReason).HasMaxLength(1000);
+                entity.Property(x => x.PreparationDate).HasColumnType("date");
                 entity.Property(x => x.RowVersion).IsRowVersion();
                 entity.HasIndex(x => x.OrderCode).IsUnique();
                 entity.HasIndex(x => x.CreatedAt);
@@ -364,6 +486,15 @@ namespace Lamie.Infrastructure.Persistence
                 entity.HasIndex(x => new { x.PaymentStatus, x.CreatedAt });
                 entity.HasIndex(x => new { x.ChannelId, x.CreatedAt });
                 entity.HasIndex(x => new { x.DeliveryAt, x.OrderStatus });
+                entity.HasIndex(x => x.CompletedAt);
+                entity.HasIndex(x => x.DeliveredAt);
+                entity.HasIndex(x => x.PaidInFullAt);
+                entity.HasIndex(x => x.PreparationDate);
+                entity.HasIndex(x => x.ShippingFeeIncurredAt);
+                entity.HasIndex(x => x.ShippingFeePaidAt);
+                entity.HasIndex(x => x.ShippingFeePaymentIdempotencyKey)
+                    .IsUnique()
+                    .HasFilter("[shipping_fee_payment_idempotency_key] IS NOT NULL");
                 entity.HasIndex(x => new { x.CustomerId, x.CreatedAt });
                 entity.HasIndex(x => new { x.AddressScheme, x.ProvinceCode, x.CommuneCode });
 
@@ -1216,6 +1347,21 @@ namespace Lamie.Infrastructure.Persistence
                 entity.Property(x => x.IsActive)
                       .HasColumnName("is_active");
             });
+        }
+
+        private static void ConfigurePayment<TPayment>(ModelBuilder modelBuilder, string table, string parentProperty)
+            where TPayment : class
+        {
+            var entity = modelBuilder.Entity<TPayment>();
+            entity.ToTable(table);
+            entity.HasKey("Id");
+            entity.Property<decimal>("Amount").HasPrecision(18, 2);
+            entity.Property<PaymentMethod>("Method").HasConversion<int>();
+            entity.Property<PaymentTransactionStatus>("Status").HasConversion<int>();
+            entity.Property<string>("IdempotencyKey").HasMaxLength(100);
+            entity.Property<string>("Note").HasMaxLength(1000);
+            entity.HasIndex("IdempotencyKey").IsUnique();
+            entity.HasIndex(parentProperty, "PaidAt");
         }
         public override int SaveChanges()
         {

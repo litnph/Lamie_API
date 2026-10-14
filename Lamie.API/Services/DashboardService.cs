@@ -51,8 +51,12 @@ public sealed class DashboardService : IDashboardService
         var activeStats = await _dbContext.Orders
             .AsNoTracking()
             .Where(order => order.OrderStatus == OrderStatus.Created ||
+                order.OrderStatus == OrderStatus.Confirmed ||
                 order.OrderStatus == OrderStatus.Producing ||
-                order.OrderStatus == OrderStatus.Shipping)
+                order.OrderStatus == OrderStatus.Ready ||
+                order.OrderStatus == OrderStatus.Shipping ||
+                order.OrderStatus == OrderStatus.DeliveryFailed ||
+                order.OrderStatus == OrderStatus.Delivered)
             .GroupBy(_ => 1)
             .Select(group => new
             {
@@ -64,7 +68,7 @@ public sealed class DashboardService : IDashboardService
 
         var attentionOrders = await _dbContext.Orders
             .AsNoTracking()
-            .Where(order => order.OrderStatus == OrderStatus.Created || order.OrderStatus == OrderStatus.Producing)
+            .Where(order => order.OrderStatus == OrderStatus.Created || order.OrderStatus == OrderStatus.Confirmed || order.OrderStatus == OrderStatus.Producing)
             .OrderBy(order => order.OrderStatus == OrderStatus.Created ? 0 : 1)
             .ThenBy(order => order.CreatedAt)
             .ThenBy(order => order.Id)
@@ -75,8 +79,11 @@ public sealed class DashboardService : IDashboardService
             .AsNoTracking()
             .Where(order =>
                 (order.OrderStatus == OrderStatus.Created ||
+                 order.OrderStatus == OrderStatus.Confirmed ||
                  order.OrderStatus == OrderStatus.Producing ||
-                 order.OrderStatus == OrderStatus.Shipping) &&
+                 order.OrderStatus == OrderStatus.Ready ||
+                 order.OrderStatus == OrderStatus.Shipping ||
+                 order.OrderStatus == OrderStatus.DeliveryFailed) &&
                 order.DeliveryAt <= upcomingLimitUtc);
         var riskStats = await riskQuery
             .GroupBy(_ => 1)
@@ -96,11 +103,11 @@ public sealed class DashboardService : IDashboardService
         var revenueByDay = await _dbContext.Orders
             .AsNoTracking()
             .Where(order =>
-                order.CreatedAt >= previousStartUtc &&
-                order.CreatedAt <= currentEndUtc &&
-                order.PaymentStatus == PaymentStatus.Paid &&
-                order.OrderStatus != OrderStatus.Cancelled)
-            .GroupBy(order => order.CreatedAt.AddHours(LocalUtcOffsetHours).Date)
+                order.DeliveredAt.HasValue &&
+                order.DeliveredAt.Value >= previousStartUtc &&
+                order.DeliveredAt.Value <= currentEndUtc &&
+                (order.OrderStatus == OrderStatus.Delivered || order.OrderStatus == OrderStatus.Completed))
+            .GroupBy(order => order.DeliveredAt!.Value.AddHours(LocalUtcOffsetHours).Date)
             .Select(group => new
             {
                 Date = group.Key,
@@ -171,14 +178,131 @@ public sealed class DashboardService : IDashboardService
             (activeStats?.Awaiting ?? 0) + (activeStats?.Preparing ?? 0),
             riskStats?.Late ?? 0,
             riskStats?.Upcoming ?? 0,
-            attentionOrders.Select(OrderService.ToListDto).ToList(),
+            attentionOrders.Select(order => OrderService.ToListDto(order)).ToList(),
             deliveryRisks);
         var inventory = new DashboardInventoryDto(
             inventoryStats?.Low ?? 0,
             inventoryStats?.Out ?? 0,
             productsAtRisk);
 
-        return new DashboardDto(range, generatedAt, newOrdersCount, active, revenue, inventory, []);
+        var todayLocal = DateOnly.FromDateTime(generatedAt.ToOffset(TimeSpan.FromHours(LocalUtcOffsetHours)).DateTime);
+        var todayStart = new DateTimeOffset(todayLocal.ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(LocalUtcOffsetHours)).UtcDateTime;
+        var tomorrowStart = new DateTimeOffset(todayLocal.AddDays(1).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(LocalUtcOffsetHours)).UtcDateTime;
+        var upcomingEnd = new DateTimeOffset(todayLocal.AddDays(7).ToDateTime(TimeOnly.MinValue), TimeSpan.FromHours(LocalUtcOffsetHours)).UtcDateTime;
+        var upcomingOrders = await _dbContext.Orders.AsNoTracking()
+            .Where(order => order.DeliveryAt >= todayStart
+                && order.DeliveryAt < upcomingEnd
+                && (order.OrderStatus == OrderStatus.Created
+                    || order.OrderStatus == OrderStatus.Confirmed
+                    || order.OrderStatus == OrderStatus.Producing
+                    || order.OrderStatus == OrderStatus.Ready
+                    || order.OrderStatus == OrderStatus.Shipping
+                    || order.OrderStatus == OrderStatus.DeliveryFailed))
+            .OrderBy(order => order.DeliveryAt)
+            .ThenBy(order => order.OrderCode)
+            .Include(order => order.Items)
+            .Include(order => order.Images)
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+        var upcomingIds = upcomingOrders.Select(order => order.Id).ToArray();
+        var paymentRows = await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => upcomingIds.Contains(payment.OrderId)
+                && payment.Status == PaymentTransactionStatus.Succeeded)
+            .GroupBy(payment => payment.OrderId)
+            .Select(group => new
+            {
+                OrderId = group.Key,
+                Amount = group.Sum(payment => payment.Kind == OrderPaymentKind.Refund ? -payment.Amount : payment.Amount),
+                Count = group.Count()
+            })
+            .ToListAsync(cancellationToken);
+        var paymentByOrder = paymentRows.ToDictionary(row => row.OrderId, row => (row.Amount, row.Count));
+        var upcomingDtos = upcomingOrders.Select(order =>
+        {
+            var payment = paymentByOrder.GetValueOrDefault(order.Id);
+            return OrderService.ToListDto(order, payment.Amount, payment.Count);
+        }).ToList();
+        var deliveryDays = Enumerable.Range(0, 7).Select(offset =>
+        {
+            var date = todayLocal.AddDays(offset);
+            var count = upcomingOrders.Count(order =>
+                DateOnly.FromDateTime(order.DeliveryAt.AddHours(LocalUtcOffsetHours)) == date);
+            return new DashboardDeliveryDayDto(date, count);
+        }).ToList();
+        var overdueBeforeToday = await _dbContext.Orders.AsNoTracking().CountAsync(order =>
+            order.DeliveryAt < todayStart
+            && (order.OrderStatus == OrderStatus.Created
+                || order.OrderStatus == OrderStatus.Confirmed
+                || order.OrderStatus == OrderStatus.Producing
+                || order.OrderStatus == OrderStatus.Ready
+                || order.OrderStatus == OrderStatus.Shipping
+                || order.OrderStatus == OrderStatus.DeliveryFailed), cancellationToken);
+
+        var todayCompleted = await _dbContext.Orders.AsNoTracking()
+            .Where(order => order.DeliveredAt.HasValue
+                && order.DeliveredAt.Value >= todayStart
+                && order.DeliveredAt.Value < tomorrowStart
+                && (order.OrderStatus == OrderStatus.Delivered || order.OrderStatus == OrderStatus.Completed))
+            .ToListAsync(cancellationToken);
+        var todayPayments = await _dbContext.OrderPayments.AsNoTracking()
+            .Where(payment => payment.PaidAt >= todayStart
+                && payment.PaidAt < tomorrowStart
+                && payment.Status == PaymentTransactionStatus.Succeeded)
+            .ToListAsync(cancellationToken);
+        var todayShippingPaid = await _dbContext.Orders.AsNoTracking()
+            .Where(order => order.ShippingFeeActual.HasValue
+                && order.ShippingFeePaidAt.HasValue
+                && order.ShippingFeePaidAt.Value >= todayStart
+                && order.ShippingFeePaidAt.Value < tomorrowStart)
+            .SumAsync(order => order.ShippingFeeActual ?? 0, cancellationToken);
+        var todayOtherPaid = await _dbContext.Expenses.AsNoTracking()
+            .Where(expense => expense.PaidAt.HasValue
+                && expense.PaidAt.Value >= todayStart
+                && expense.PaidAt.Value < tomorrowStart)
+            .SumAsync(expense => expense.Amount, cancellationToken);
+        var deposits = todayPayments.Where(payment => payment.Kind is OrderPaymentKind.Deposit or OrderPaymentKind.Full)
+            .Sum(payment => payment.Amount);
+        var remainders = todayPayments.Where(payment => payment.Kind == OrderPaymentKind.Remainder)
+            .Sum(payment => payment.Amount);
+        var refunds = todayPayments.Where(payment => payment.Kind == OrderPaymentKind.Refund)
+            .Sum(payment => payment.Amount);
+        var cashIn = deposits + remainders;
+        var cashOut = refunds + todayShippingPaid + todayOtherPaid;
+        var productRevenueToday = todayCompleted.Sum(order => order.SubTotal - order.DiscountTotal);
+        var shippingRevenueToday = todayCompleted.Sum(order => order.ShippingFee);
+        var missingHistory = await _dbContext.Orders.AsNoTracking().CountAsync(order =>
+                order.PaymentStatus != PaymentStatus.Unpaid
+                && !_dbContext.OrderPayments.Any(payment => payment.OrderId == order.Id), cancellationToken)
+            + await _dbContext.Expenses.AsNoTracking().CountAsync(expense => expense.PaymentHistoryIncomplete, cancellationToken);
+
+        var v2 = new DashboardV2Dto(
+            new DashboardUpcomingDto(
+                todayLocal,
+                todayLocal.AddDays(6),
+                upcomingDtos.Count,
+                upcomingOrders.Count(order => order.DeliveryAt < nowUtc || order.OrderStatus == OrderStatus.Created),
+                upcomingDtos.Sum(order => order.TotalAmount),
+                upcomingDtos.Sum(order => order.PaidAmount),
+                upcomingDtos.Sum(order => order.RemainingAmount),
+                overdueBeforeToday,
+                deliveryDays,
+                upcomingDtos.Where(order => order.DeliveryAt >= todayStart && order.DeliveryAt < tomorrowStart).Take(6).ToList()),
+            new DashboardTodayFinanceDto(
+                todayLocal,
+                todayCompleted.Count,
+                productRevenueToday,
+                shippingRevenueToday,
+                productRevenueToday + shippingRevenueToday,
+                cashIn,
+                cashOut,
+                cashIn - cashOut,
+                deposits,
+                remainders,
+                todayShippingPaid,
+                todayOtherPaid + refunds,
+                missingHistory));
+
+        return new DashboardDto(range, generatedAt, newOrdersCount, active, revenue, inventory, []) { V2 = v2 };
     }
 
     public static DashboardPeriodRangeDto CreatePeriod(string period, DateTimeOffset generatedAt)
@@ -213,7 +337,7 @@ public sealed class DashboardService : IDashboardService
     }
 
     public static bool CountsAsRevenue(PaymentStatus paymentStatus, OrderStatus orderStatus) =>
-        paymentStatus == PaymentStatus.Paid && orderStatus != OrderStatus.Cancelled;
+        orderStatus is OrderStatus.Delivered or OrderStatus.Completed;
 
     private static DashboardRevenueDto BuildRevenue(
         DashboardPeriodRangeDto range,
@@ -281,8 +405,8 @@ public sealed class DashboardService : IDashboardService
         order.OrdererName,
         order.OrdererPhone,
         order.ChannelId,
-        order.RecipientName,
-        order.RecipientPhone,
+        order.RecipientName ?? string.Empty,
+        order.RecipientPhone ?? string.Empty,
         order.PickupAtShop,
         order.DeliveryAddress,
         order.DeliveryAt,

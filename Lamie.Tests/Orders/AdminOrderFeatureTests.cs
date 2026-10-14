@@ -88,7 +88,7 @@ public sealed class AdminOrderFeatureTests
     private static OrderItem CreateItem(OrderItemSnapshot snapshot)
     {
         var order = new Order("TEST-1", Channel.AdminId, null,
-            new OrderDetails("Admin", "", "Recipient", "0900000000", true, false, null, null, null, null,
+            new OrderDetails("Admin", "0900000001", "Recipient", "0900000000", true, false, null, null, null, null,
                 DateTime.UtcNow.AddDays(1), null, 0, 0, null, null, null),
             [snapshot], DateTime.UtcNow, null, null);
         return Assert.Single(order.Items);

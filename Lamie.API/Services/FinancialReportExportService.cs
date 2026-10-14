@@ -53,23 +53,21 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
         html.Append("body{font-family:Arial,sans-serif;color:#292623;margin:32px;font-size:12px}");
         html.Append("h1{font-size:24px;margin:0 0 6px}h2{font-size:16px;margin:28px 0 8px}");
         html.Append("p{line-height:1.5}.meta{color:#625d57;margin:0 0 24px}");
-        html.Append(".totals{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:18px 0}");
+        html.Append(".totals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:18px 0}");
         html.Append(".total{border:1px solid #ded8d1;padding:14px}.label{color:#625d57}.value{font-size:20px;font-weight:700;margin-top:6px}");
         html.Append("table{width:100%;border-collapse:collapse;margin-top:8px}th,td{border-bottom:1px solid #ded8d1;padding:8px;text-align:left}");
         html.Append("th{background:#f1efeb}.number{text-align:right;font-variant-numeric:tabular-nums}.note{color:#625d57;margin-top:18px}");
         html.Append("@page{size:A4 landscape;margin:14mm}@media print{body{margin:0}.no-print{display:none}}");
         html.Append("</style></head><body>");
-        html.Append("<h1>Báo cáo doanh thu, chi phí và lợi nhuận</h1>");
+        html.Append("<h1>Báo cáo doanh thu, chi phí &amp; lợi nhuận</h1>");
         html.Append($"<p class=\"meta\">Kỳ {encode(FormatDate(report.Period.From))} - {encode(FormatDate(report.Period.To))}. Tạo lúc {encode(report.GeneratedAt.ToOffset(TimeSpan.FromHours(7)).ToString("dd/MM/yyyy HH:mm", VietnameseCulture))}.</p>");
         html.Append("<section class=\"totals\">");
         AppendTotal(html, "Doanh thu", report.Revenue);
-        AppendTotal(html, "Tiền sản phẩm", report.ProductRevenue);
-        AppendTotal(html, "Phí giao hàng", report.ShippingFee);
-        AppendTotal(html, "Chi phí", report.Expense);
-        AppendTotal(html, "Lợi nhuận", report.Profit);
+        AppendTotal(html, "Tổng chi phí", report.MaterialProductCogs + report.MaterialWaste + report.Expense);
+        AppendTotal(html, report.IsProfitProvisional ? "Lợi nhuận tạm tính" : "Lợi nhuận trước thuế", report.Profit);
         html.Append("</section>");
         html.Append($"<p class=\"meta\">Phí giao hàng {encode(report.IncludeShippingFeeInRevenue ? "được tính" : "không được tính")} vào doanh thu.</p>");
-        html.Append("<h2>Diễn biến theo kỳ</h2><table><thead><tr><th>Kỳ</th><th class=\"number\">Doanh thu</th><th class=\"number\">Tiền sản phẩm</th><th class=\"number\">Phí giao hàng</th><th class=\"number\">Chi phí</th><th class=\"number\">Lợi nhuận</th><th class=\"number\">Số đơn</th><th class=\"number\">Số khoản chi</th></tr></thead><tbody>");
+        html.Append("<h2>Diễn biến theo kỳ</h2><table><thead><tr><th>Kỳ</th><th class=\"number\">Doanh thu</th><th class=\"number\">Tiền hoa</th><th class=\"number\">Ship thu khách</th><th class=\"number\">Ship thực tế</th><th class=\"number\">Chi phí khác</th><th class=\"number\">Chênh lệch tạm tính</th><th class=\"number\">Số đơn</th></tr></thead><tbody>");
         foreach (var point in report.Points)
         {
             html.Append("<tr>");
@@ -77,13 +75,22 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
             html.Append($"<td class=\"number\">{encode(FormatMoney(point.Revenue))}</td>");
             html.Append($"<td class=\"number\">{encode(FormatMoney(point.ProductRevenue))}</td>");
             html.Append($"<td class=\"number\">{encode(FormatMoney(point.ShippingFee))}</td>");
-            html.Append($"<td class=\"number\">{encode(FormatMoney(point.Expense))}</td>");
+            html.Append($"<td class=\"number\">{encode(FormatMoney(point.ShippingFeeActual))}</td>");
+            html.Append($"<td class=\"number\">{encode(FormatMoney(point.OtherExpense))}</td>");
             html.Append($"<td class=\"number\">{encode(FormatMoney(point.Profit))}</td>");
             html.Append($"<td class=\"number\">{point.OrderCount}</td>");
-            html.Append($"<td class=\"number\">{point.ExpenseCount}</td>");
             html.Append("</tr>");
         }
         html.Append("</tbody></table>");
+        html.Append("<h2>Tổng hợp giá vốn và lợi nhuận kỳ</h2><table><tbody>");
+        AppendSummaryRow(html, "Giá vốn nguyên liệu vào sản phẩm", report.MaterialProductCogs);
+        AppendSummaryRow(html, "Hoa hỏng / hao hụt", report.MaterialWaste);
+        AppendSummaryRow(html, "Phí ship thực tế", report.ShippingFeeActual);
+        AppendSummaryRow(html, "Chi phí vận hành", report.OtherExpense);
+        AppendSummaryRow(html, report.IsProfitProvisional ? "Lợi nhuận tạm tính" : "Lợi nhuận trước thuế", report.Profit);
+        html.Append("</tbody></table>");
+        if (report.ProfitProvisionalReasons.Count > 0)
+            html.Append($"<p class=\"note\"><strong>Số liệu tạm tính:</strong> {encode(string.Join(" ", report.ProfitProvisionalReasons))}</p>");
         html.Append("<h2>Chi phí theo danh mục</h2><table><thead><tr><th>Danh mục</th><th class=\"number\">Số khoản</th><th class=\"number\">Tổng chi</th></tr></thead><tbody>");
         foreach (var category in report.ExpensesByCategory)
         {
@@ -147,13 +154,19 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
         WriteRow(writer, [StringCell("Doanh thu"), NumberCell(report.Revenue, "Money")]);
         WriteRow(writer, [StringCell("Tiền sản phẩm"), NumberCell(report.ProductRevenue, "Money")]);
         WriteRow(writer, [StringCell("Phí giao hàng"), NumberCell(report.ShippingFee, "Money")]);
-        WriteRow(writer, [StringCell("Chi phí"), NumberCell(report.Expense, "Money")]);
-        WriteRow(writer, [StringCell("Lợi nhuận"), NumberCell(report.Profit, "Money")]);
+        WriteRow(writer, [StringCell("Phí ship thực tế"), NumberCell(report.ShippingFeeActual, "Money")]);
+        WriteRow(writer, [StringCell("Chi phí khác"), NumberCell(report.OtherExpense, "Money")]);
+        WriteRow(writer, [StringCell("Giá vốn nguyên liệu vào sản phẩm"), NumberCell(report.MaterialProductCogs, "Money")]);
+        WriteRow(writer, [StringCell("Hoa hỏng / hao hụt"), NumberCell(report.MaterialWaste, "Money")]);
+        WriteRow(writer, [StringCell(report.IsProfitProvisional ? "Lợi nhuận tạm tính" : "Lợi nhuận trước thuế"), NumberCell(report.Profit, "Money")]);
         WriteRow(writer, [StringCell("Biên lợi nhuận (%)"), report.ProfitMarginPercent.HasValue ? NumberCell(report.ProfitMarginPercent.Value, "Percent") : StringCell("Không xác định")]);
+        WriteRow(writer, [StringCell("Trạng thái lợi nhuận"), StringCell(report.IsProfitProvisional ? "Tạm tính" : "Đã xác nhận")]);
+        if (report.ProfitProvisionalReasons.Count > 0)
+            WriteRow(writer, [StringCell("Lý do tạm tính"), StringCell(string.Join(" ", report.ProfitProvisionalReasons))]);
         WriteRow(writer, [StringCell("Số đơn đã tính doanh thu"), NumberCell(report.OrderCount)]);
         WriteRow(writer, [StringCell("Số khoản chi"), NumberCell(report.ExpenseCount)]);
         WriteRow(writer, [StringCell("Cơ sở doanh thu"), StringCell(report.RevenueBasis)]);
-        WriteRow(writer, [StringCell("Cơ sở lợi nhuận"), StringCell(report.ProfitBasis)]);
+        WriteRow(writer, [StringCell("Cơ sở chênh lệch tạm tính"), StringCell(report.ProfitBasis)]);
         EndSheet(writer);
     }
 
@@ -168,8 +181,9 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
             StringCell("Doanh thu", "Header"),
             StringCell("Tiền sản phẩm", "Header"),
             StringCell("Phí giao hàng", "Header"),
-            StringCell("Chi phí", "Header"),
-            StringCell("Lợi nhuận", "Header"),
+            StringCell("Phí ship thực tế", "Header"),
+            StringCell("Chi phí khác", "Header"),
+            StringCell("Chênh lệch tạm tính", "Header"),
             StringCell("Số đơn", "Header"),
             StringCell("Số khoản chi", "Header")
         ]);
@@ -183,7 +197,8 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
                 NumberCell(point.Revenue, "Money"),
                 NumberCell(point.ProductRevenue, "Money"),
                 NumberCell(point.ShippingFee, "Money"),
-                NumberCell(point.Expense, "Money"),
+                NumberCell(point.ShippingFeeActual, "Money"),
+                NumberCell(point.OtherExpense, "Money"),
                 NumberCell(point.Profit, "Money"),
                 NumberCell(point.OrderCount),
                 NumberCell(point.ExpenseCount)
@@ -258,6 +273,14 @@ public sealed class FinancialReportExportService : IFinancialReportExportService
         html.Append($"<div class=\"label\">{HtmlEncoder.Default.Encode(label)}</div>");
         html.Append($"<div class=\"value\">{HtmlEncoder.Default.Encode(FormatMoney(value))}</div>");
         html.Append("</div>");
+    }
+
+    private static void AppendSummaryRow(StringBuilder html, string label, decimal value)
+    {
+        html.Append("<tr>");
+        html.Append($"<td>{HtmlEncoder.Default.Encode(label)}</td>");
+        html.Append($"<td class=\"number\">{HtmlEncoder.Default.Encode(FormatMoney(value))}</td>");
+        html.Append("</tr>");
     }
 
     private static string FormatMoney(decimal value) => $"{value.ToString("N0", VietnameseCulture)} ₫";

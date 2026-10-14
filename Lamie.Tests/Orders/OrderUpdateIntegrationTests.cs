@@ -24,6 +24,8 @@ public sealed class OrderUpdateIntegrationTests
 
         var created = await environment.Service.CreateAsync(new CreateOrderForm
         {
+            OrdererName = "Khach dat",
+            OrdererPhone = "0900000001",
             CreateMember = false,
             PickupAtShop = false,
             DeliveryAddress = "461 Phan Van Tri",
@@ -56,6 +58,8 @@ public sealed class OrderUpdateIntegrationTests
 
         var created = await environment.Service.CreateAsync(new CreateOrderForm
         {
+            OrdererName = "Khach dat",
+            OrdererPhone = "0900000001",
             CreateMember = false,
             PickupAtShop = true,
             DeliveryAt = TestEnvironment.Now.AddDays(1),
@@ -78,7 +82,7 @@ public sealed class OrderUpdateIntegrationTests
     }
 
     [Fact]
-    public async Task CreateOrderUsesExplicitMemberIntentAndKeepsContactsOptional()
+    public async Task CreateOrderUsesExplicitMemberIntentAndKeepsRecipientOptional()
     {
         await using var environment = await TestEnvironment.CreateAsync(
             new ProductSeed("MEMBER-FLOW", 0, false, 100_000));
@@ -99,13 +103,13 @@ public sealed class OrderUpdateIntegrationTests
             Items = [new OrderLineRequest { ProductId = product.Id.ToString(), ProductName = "Hoa", UnitPrice = 100_000, Quantity = 1 }]
         };
 
-        var withoutMember = await environment.Service.CreateAsync(Form(string.Empty, string.Empty, false), CancellationToken.None);
-        var nameOnly = await environment.Service.CreateAsync(Form("Khách mới", string.Empty, true), CancellationToken.None);
+        var withoutMember = await environment.Service.CreateAsync(Form("Khách lẻ", "0900000001", false), CancellationToken.None);
+        var nameOnly = await environment.Service.CreateAsync(Form("Khách mới", "0900000002", true), CancellationToken.None);
         var selected = await environment.Service.CreateAsync(Form("Tên chỉ dùng trên đơn", "0999999999", false, existing.Id), CancellationToken.None);
 
         Assert.Null(withoutMember.CustomerId);
-        Assert.Empty(withoutMember.RecipientName);
-        Assert.Empty(withoutMember.RecipientPhone);
+        Assert.Null(withoutMember.RecipientName);
+        Assert.Null(withoutMember.RecipientPhone);
         Assert.Equal("Người gửi", withoutMember.SenderName);
         Assert.NotNull(nameOnly.CustomerId);
         Assert.Equal(existing.Id, selected.CustomerId);
@@ -137,6 +141,7 @@ public sealed class OrderUpdateIntegrationTests
         var created = await environment.Service.CreateAsync(new CreateOrderForm
         {
             OrdererName = "Orderer",
+            OrdererPhone = "0900000001",
             RecipientName = "Recipient",
             RecipientPhone = "0900000000",
             PickupAtShop = true,
@@ -261,7 +266,7 @@ public sealed class OrderUpdateIntegrationTests
             }),
             CancellationToken.None);
 
-        Assert.Empty(updated.RecipientPhone);
+        Assert.Null(updated.RecipientPhone);
         Assert.Equal(before.OrdererPhone, updated.OrdererPhone);
     }
 
@@ -307,7 +312,8 @@ public sealed class OrderUpdateIntegrationTests
             order.Id,
             CreateUpdateForm(before, environment.Products[0], quantity: 3),
             CancellationToken.None);
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
 
         var persistedProduct = await environment.DbContext.Products.SingleAsync();
@@ -315,6 +321,44 @@ public sealed class OrderUpdateIntegrationTests
         Assert.Equal(2, persistedProduct.Stock);
         Assert.Equal(OrderStatus.Producing, persistedOrder.OrderStatus);
         Assert.True(persistedOrder.InventoryReserved);
+    }
+
+    [Fact]
+    public async Task PrepareOrderMovesCreatedOrderDirectlyToProducing()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-DIRECT-PREPARE", 5, true, 100));
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 2)]);
+
+        var updated = await environment.Service.RunWorkflowActionAsync(
+            order.Id,
+            "prepare-order",
+            new(),
+            CancellationToken.None);
+
+        Assert.Equal(OrderStatus.Producing, updated.OrderStatus);
+        Assert.Equal(3, (await environment.DbContext.Products.SingleAsync()).Stock);
+    }
+
+    [Fact]
+    public async Task PrivilegedOverridePersistsAuditAndStillRejectsManualCompletion()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("ROSE-OVERRIDE", 5, true, 100));
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
+        var before = await environment.Service.GetAsync(order.Id, CancellationToken.None);
+
+        var updated = await environment.Service.OverrideStatusAsync(
+            order.Id,
+            new OverrideOrderStatusRequest(OrderStatus.Ready, before.RowVersion, "Khớp tình trạng thực tế"),
+            CancellationToken.None);
+
+        Assert.Equal(OrderStatus.Ready, updated.OrderStatus);
+        Assert.Contains(updated.ChangeLogs, log => log.ChangeType == "StatusOverridden");
+        await Assert.ThrowsAsync<DomainException>(() => environment.Service.OverrideStatusAsync(
+            order.Id,
+            new OverrideOrderStatusRequest(OrderStatus.Completed, updated.RowVersion),
+            CancellationToken.None));
     }
 
     [Fact]
@@ -329,15 +373,16 @@ public sealed class OrderUpdateIntegrationTests
             new OrderLineSeed(environment.Products[1], 2)
         ]);
 
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
         var exception = await Assert.ThrowsAsync<ConflictException>(() =>
-            environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None));
+            environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None));
         environment.DbContext.ChangeTracker.Clear();
 
         var products = await environment.DbContext.Products.OrderBy(product => product.Id).ToListAsync();
         var persistedOrder = await environment.DbContext.Orders.SingleAsync();
         Assert.Contains("không đủ tồn kho", exception.Message);
         Assert.Equal([5, 1], products.Select(product => product.Stock));
-        Assert.Equal(OrderStatus.Created, persistedOrder.OrderStatus);
+        Assert.Equal(OrderStatus.Confirmed, persistedOrder.OrderStatus);
         Assert.False(persistedOrder.InventoryReserved);
     }
 
@@ -348,8 +393,9 @@ public sealed class OrderUpdateIntegrationTests
             new ProductSeed("ROSE-CANCEL", 5, true, 100));
         var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 3)]);
 
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Cancelled, CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "cancel", new(Reason: "Khách hủy"), CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
 
         Assert.Equal(5, (await environment.DbContext.Products.SingleAsync()).Stock);
@@ -381,8 +427,13 @@ public sealed class OrderUpdateIntegrationTests
                 Materials = [new SaveOrderMaterialItem(null, stockUnit.Id, 2.5m)]
             }),
             CancellationToken.None);
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
-        await environment.Service.ReturnToPreviousStatusAsync(order.Id, CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
+        var producing = await environment.Service.GetAsync(order.Id, CancellationToken.None);
+        await environment.Service.ReturnToPreviousStatusAsync(
+            order.Id,
+            new ReturnOrderToPreviousStatusRequest(producing.RowVersion),
+            CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
 
         Assert.Equal(5, (await environment.DbContext.Products.SingleAsync()).Stock);
@@ -400,7 +451,8 @@ public sealed class OrderUpdateIntegrationTests
             new ProductSeed("CUSTOM-BOUQUET", 0, false, 500));
         var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 2)]);
 
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
 
         Assert.Equal(0, (await environment.DbContext.Products.SingleAsync()).Stock);
@@ -468,9 +520,14 @@ public sealed class OrderUpdateIntegrationTests
         var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
         var stale = await environment.Service.GetAsync(order.Id, CancellationToken.None);
 
-        await environment.Service.ChangePaymentStatusAsync(
+        await environment.Service.AddPaymentAsync(
             order.Id,
-            PaymentStatus.Deposited,
+            new CreateOrderPaymentRequest(
+                10,
+                OrderPaymentKind.Deposit,
+                PaymentMethod.BankTransfer,
+                TestEnvironment.Now,
+                "stale-row-version-payment"),
             CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
 
@@ -494,7 +551,8 @@ public sealed class OrderUpdateIntegrationTests
         await using var environment = await TestEnvironment.CreateAsync(
             new ProductSeed("ROSE-LOCKED", 5, true, 100));
         var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
-        await environment.Service.ChangeStatusAsync(order.Id, OrderStatus.Producing, CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "confirm", new(), CancellationToken.None);
+        await environment.Service.RunWorkflowActionAsync(order.Id, "start-preparation", new(), CancellationToken.None);
         environment.DbContext.ChangeTracker.Clear();
         var producing = await environment.Service.GetAsync(order.Id, CancellationToken.None);
 
@@ -505,6 +563,30 @@ public sealed class OrderUpdateIntegrationTests
                 CancellationToken.None));
 
         Assert.Contains("trạng thái Đã tạo", exception.Message);
+    }
+
+    [Fact]
+    public async Task PaymentIdempotencyReturnsTheSameTransactionAndRejectsDifferentContent()
+    {
+        await using var environment = await TestEnvironment.CreateAsync(
+            new ProductSeed("PAYMENT-IDEMPOTENCY", 0, false, 1_100_000));
+        var order = await environment.AddOrderAsync([new OrderLineSeed(environment.Products[0], 1)]);
+        var request = new CreateOrderPaymentRequest(
+            600_000,
+            OrderPaymentKind.Deposit,
+            PaymentMethod.BankTransfer,
+            new DateTimeOffset(2026, 10, 9, 3, 0, 0, TimeSpan.Zero),
+            "payment-idempotency-test");
+
+        var first = await environment.Service.AddPaymentAsync(order.Id, request, CancellationToken.None);
+        var repeated = await environment.Service.AddPaymentAsync(order.Id, request, CancellationToken.None);
+
+        Assert.Equal(first.Id, repeated.Id);
+        Assert.Equal(1, await environment.DbContext.OrderPayments.CountAsync());
+        await Assert.ThrowsAsync<ConflictException>(() => environment.Service.AddPaymentAsync(
+            order.Id,
+            request with { Amount = 550_000 },
+            CancellationToken.None));
     }
 
     private static UpdateOrderForm CreateUpdateForm(
@@ -646,7 +728,7 @@ public sealed class OrderUpdateIntegrationTests
                 null,
                 new OrderDetails(
                     "Orderer",
-                    string.Empty,
+                    "0900000001",
                     "Recipient",
                     "0911111111",
                     false,

@@ -95,8 +95,15 @@ public sealed class OrderApiContractTests
         AssertRoute(nameof(OrdersController.Create), typeof(HttpPostAttribute), null, PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.CreateBatch), typeof(HttpPostAttribute), "batch", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.Update), typeof(HttpPutAttribute), "{id:guid}", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.RunWorkflowAction), typeof(HttpPostAttribute), "{id:guid}/actions/{workflowAction}", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.UpdateRecipient), typeof(HttpPatchAttribute), "{id:guid}/recipient", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.UpdateAssignment), typeof(HttpPatchAttribute), "{id:guid}/assignment", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.UpdateChecklist), typeof(HttpPatchAttribute), "{id:guid}/checklist", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.Hold), typeof(HttpPostAttribute), "{id:guid}/hold", PermissionNames.OrdersManage);
+        AssertRoute(nameof(OrdersController.Resume), typeof(HttpPostAttribute), "{id:guid}/resume", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.ChangeStatus), typeof(HttpPatchAttribute), "{id:guid}/status", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.ReturnToPreviousStatus), typeof(HttpPatchAttribute), "{id:guid}/status/previous", PermissionNames.OrdersReverseStatus);
+        AssertRoute(nameof(OrdersController.OverrideStatus), typeof(HttpPatchAttribute), "{id:guid}/status/override", PermissionNames.OrdersChangeStatus);
         AssertRoute(nameof(OrdersController.ChangePaymentStatus), typeof(HttpPatchAttribute), "{id:guid}/payment-status", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.UpdateShippingFeeActual), typeof(HttpPatchAttribute), "{id:guid}/shipping-fee-actual", PermissionNames.OrdersManage);
         AssertRoute(nameof(OrdersController.Delete), typeof(HttpDeleteAttribute), "{id:guid}", PermissionNames.OrdersCancel);

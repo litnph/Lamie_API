@@ -12,6 +12,57 @@ namespace Lamie.Tests.Orders;
 public sealed class OrderServiceIntegrationTests
 {
     [Fact]
+    public async Task DeliveryBoardOrdersLateUpcomingUnpaidAndCompletedBeforePagination()
+    {
+        var databaseName = $"LamieOrderPriority_{Guid.NewGuid():N}";
+        var connectionString = $"Server=(localdb)\\mssqllocaldb;Database={databaseName};Trusted_Connection=True;MultipleActiveResultSets=true";
+        var options = new DbContextOptionsBuilder<AppDbContext>()
+            .UseSqlServer(connectionString)
+            .UseSnakeCaseNamingConvention()
+            .Options;
+        await using var dbContext = new AppDbContext(options);
+
+        try
+        {
+            await dbContext.Database.EnsureCreatedAsync();
+            var now = new DateTimeOffset(2026, 10, 13, 3, 0, 0, TimeSpan.Zero);
+            var createdAt = now.UtcDateTime.AddDays(-20);
+            var late = CreateOrder("L261013-LATE", createdAt, now.UtcDateTime.AddHours(-1));
+            var upcoming = CreateOrder("L261013-SOON", createdAt, now.UtcDateTime.AddHours(1));
+            var unpaid = CreateOrder("L261013-UNPAID", createdAt, now.UtcDateTime.AddDays(-2));
+            MoveToDelivered(unpaid, createdAt.AddHours(1));
+            var completed = CreateOrder("L261013-DONE", createdAt, now.UtcDateTime.AddDays(-5));
+            completed.ChangeStatus(OrderStatus.Producing, false, createdAt.AddHours(1), null, "integration-test");
+            completed.ChangeStatus(OrderStatus.Ready, false, createdAt.AddHours(2), null, "integration-test");
+            completed.ChangeStatus(OrderStatus.Shipping, false, createdAt.AddHours(3), null, "integration-test");
+            completed.ChangePaymentStatus(PaymentStatus.Paid, createdAt.AddHours(4), null, "integration-test");
+            completed.ChangeStatus(OrderStatus.Delivered, false, createdAt.AddHours(5), null, "integration-test");
+            dbContext.Orders.AddRange(completed, unpaid, upcoming, late);
+            await dbContext.SaveChangesAsync();
+
+            var service = new OrderService(
+                dbContext,
+                new RecordingFileStorage(),
+                new HttpContextAccessor(),
+                new FixedTimeProvider(now));
+            var board = await service.DeliveryBoardAsync(
+                new OrderListQuery { Page = 1, PageSize = 20 },
+                CancellationToken.None);
+
+            Assert.Equal(
+                [late.Id, upcoming.Id, unpaid.Id, completed.Id],
+                board.Items.Select(item => item.Id));
+            Assert.Equal(["late", "today", "delivered-unpaid", "completed"], board.Items.Select(item => item.TrackingGroup));
+            Assert.Equal(1, board.Summary.LateCount);
+            Assert.Equal(1, board.Summary.CompletedCount);
+        }
+        finally
+        {
+            await dbContext.Database.EnsureDeletedAsync();
+        }
+    }
+
+    [Fact]
     public async Task DefaultListPrioritizesUnfinishedOrdersBeforeDeliveryTimeAndDeleteRemovesTheAggregate()
     {
         var databaseName = $"LamieOrderDelete_{Guid.NewGuid():N}";
@@ -37,9 +88,13 @@ public sealed class OrderServiceIntegrationTests
                 contentNote: "Send by express carrier",
                 thumbnailUrl: "https://test.local/products/thumbnail.jpg");
             earlier.AddImage(earlier.Items.Single().Id, "https://test.local/orders/illustration.jpg", 0);
-            earlier.ChangeStatus(OrderStatus.Producing, false, now.AddMinutes(1), null, "integration-test");
-            earlier.ChangeStatus(OrderStatus.Shipping, false, now.AddMinutes(2), null, "integration-test");
-            earlier.ChangeStatus(OrderStatus.Completed, false, now.AddMinutes(3), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Confirmed, false, now.AddMinutes(1), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Producing, false, now.AddMinutes(2), null, "integration-test");
+            earlier.UpdateChecklist(true, true, true, true, now.AddMinutes(3), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Ready, false, now.AddMinutes(4), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Shipping, false, now.AddMinutes(5), null, "integration-test");
+            earlier.ChangePaymentStatus(PaymentStatus.Paid, now.AddMinutes(6), null, "integration-test");
+            earlier.ChangeStatus(OrderStatus.Delivered, false, now.AddMinutes(7), null, "integration-test");
             dbContext.Orders.AddRange(later, earlier);
             await dbContext.SaveChangesAsync();
 
@@ -83,12 +138,12 @@ public sealed class OrderServiceIntegrationTests
             null,
             new OrderDetails(
                 "Orderer",
-                string.Empty,
+                "0900000001",
                 "Recipient",
                 "0911111111",
                 false,
                 provinceShipping,
-                null,
+                "123 Test Street",
                 null,
                 null,
                 null,
@@ -103,6 +158,19 @@ public sealed class OrderServiceIntegrationTests
             now,
             null,
             "integration-test");
+
+    private static void MoveToDelivered(Order order, DateTime at)
+    {
+        order.ChangeStatus(OrderStatus.Producing, false, at, null, "integration-test");
+        order.ChangeStatus(OrderStatus.Ready, false, at.AddMinutes(1), null, "integration-test");
+        order.ChangeStatus(OrderStatus.Shipping, false, at.AddMinutes(2), null, "integration-test");
+        order.ChangeStatus(OrderStatus.Delivered, false, at.AddMinutes(3), null, "integration-test");
+    }
+
+    private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
 
     private sealed class RecordingFileStorage : IFileStorage
     {

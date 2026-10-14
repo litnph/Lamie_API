@@ -19,10 +19,32 @@ public sealed class OrderDomainTests
         Assert.Equal(2, (int)OrderStatus.Producing);
         Assert.Equal(3, (int)OrderStatus.Shipping);
         Assert.Equal(4, (int)OrderStatus.Completed);
+        Assert.Equal(5, (int)OrderStatus.Confirmed);
+        Assert.Equal(6, (int)OrderStatus.Ready);
+        Assert.Equal(7, (int)OrderStatus.Delivered);
+        Assert.Equal(8, (int)OrderStatus.DeliveryFailed);
         Assert.Equal(99, (int)OrderStatus.Cancelled);
         Assert.Equal(1, (int)PaymentStatus.Unpaid);
         Assert.Equal(2, (int)PaymentStatus.Deposited);
         Assert.Equal(3, (int)PaymentStatus.Paid);
+    }
+
+    [Fact]
+    public void RecognizedRevenueRefundRequiresAnExplicitExactAllocation()
+    {
+        var orderId = Guid.NewGuid();
+        var valid = new OrderPayment(orderId, 150_000, OrderPaymentKind.Refund,
+            PaymentMethod.BankTransfer, Baseline, "refund-valid", null, Baseline, null,
+            true, 120_000, 30_000);
+
+        Assert.True(valid.AffectsRecognizedRevenue);
+        Assert.Equal(120_000, valid.ProductRevenueAdjustment);
+        Assert.Throws<DomainException>(() => new OrderPayment(orderId, 150_000,
+            OrderPaymentKind.Refund, PaymentMethod.BankTransfer, Baseline, "refund-invalid",
+            null, Baseline, null, true, 100_000, 30_000));
+        Assert.Throws<DomainException>(() => new OrderPayment(orderId, 150_000,
+            OrderPaymentKind.Full, PaymentMethod.BankTransfer, Baseline, "receipt-invalid",
+            null, Baseline, null, true, 150_000, 0));
     }
 
     [Fact]
@@ -40,17 +62,17 @@ public sealed class OrderDomainTests
         Assert.Equal(220, order.SubTotal);
         Assert.Equal(10, order.DiscountTotal);
         Assert.Equal(225, order.TotalAmount);
-        Assert.Equal(PaymentStatus.Deposited, order.PaymentStatus);
+        Assert.Equal(PaymentStatus.Unpaid, order.PaymentStatus);
         Assert.Equal(190, order.Items.First().LineTotal);
         Assert.Equal("Rose bouquet", order.Items.First().ProductName);
     }
 
     [Theory]
     [InlineData(0, false, PaymentStatus.Unpaid)]
-    [InlineData(100, false, PaymentStatus.Deposited)]
-    [InlineData(0, true, PaymentStatus.Paid)]
-    [InlineData(100, true, PaymentStatus.Paid)]
-    public void Initial_payment_status_uses_paid_flag_then_deposit(
+    [InlineData(100, false, PaymentStatus.Unpaid)]
+    [InlineData(0, true, PaymentStatus.Unpaid)]
+    [InlineData(100, true, PaymentStatus.Unpaid)]
+    public void Initial_payment_status_waits_for_a_persisted_receipt(
         decimal deposit,
         bool isPaid,
         PaymentStatus expected)
@@ -66,31 +88,57 @@ public sealed class OrderDomainTests
         var order = CreateOrder();
 
         Assert.True(order.RequiresInventoryReservation(OrderStatus.Producing));
-        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(1), null, "tester");
+        Assert.True(order.RequiresInventoryReservation(OrderStatus.Producing));
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(2), null, "tester");
         Assert.True(order.InventoryReserved);
         Assert.Throws<DomainException>(() =>
-            order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(2), null, "tester"));
+            order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(3), null, "tester"));
 
-        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(3), null, "tester");
-        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(4), null, "tester");
+        order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, true, Baseline.AddMinutes(4), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(5), null, "tester");
+        order.ChangeStatus(OrderStatus.Delivered, true, Baseline.AddMinutes(6), null, "tester");
 
-        Assert.Equal(Baseline.AddMinutes(4), order.CompletedAt);
+        Assert.Equal(OrderStatus.Delivered, order.OrderStatus);
+        Assert.Null(order.CompletedAt);
+        order.ChangePaymentStatus(PaymentStatus.Paid, Baseline.AddMinutes(7), null, "tester");
+        Assert.Equal(Baseline.AddMinutes(7), order.CompletedAt);
+    }
+
+    [Fact]
+    public void SimplifiedWorkflowMovesFromNewOrderToFinishedProductWithoutChecklist()
+    {
+        var order = CreateOrder();
+
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, true, Baseline.AddMinutes(2), null, "tester");
+
+        Assert.Equal(OrderStatus.Ready, order.OrderStatus);
+        Assert.True(order.InventoryReserved);
+    }
+
+    [Fact]
+    public void PrivilegedOverrideCanMoveBetweenOperationalStagesButCannotAssignCompleted()
+    {
+        var order = CreateOrder();
+
+        order.OverrideStatus(OrderStatus.Ready, true, Baseline.AddMinutes(1), null, "admin", "Khớp tình trạng thực tế");
+        Assert.Equal(OrderStatus.Ready, order.OrderStatus);
+        Assert.Contains(order.ChangeLogs, log => log.ChangeType == "StatusOverridden");
+
         Assert.Throws<DomainException>(() =>
-            order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(5), null, "tester"));
+            order.OverrideStatus(OrderStatus.Completed, true, Baseline.AddMinutes(2), null, "admin"));
     }
 
     [Fact]
     public void OrderCanReturnThroughPreviousProcessingStatuses()
     {
         var order = CreateOrder();
-        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
-        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(2), null, "tester");
-        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(3), null, "tester");
-
-        order.ReturnToPreviousStatus(true, Baseline.AddMinutes(4), null, "tester");
-        Assert.Equal(OrderStatus.Shipping, order.OrderStatus);
-        Assert.Null(order.CompletedAt);
-        Assert.True(order.InventoryReserved);
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(2), null, "tester");
+        order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, true, Baseline.AddMinutes(4), null, "tester");
 
         order.ReturnToPreviousStatus(true, Baseline.AddMinutes(5), null, "tester");
         Assert.Equal(OrderStatus.Producing, order.OrderStatus);
@@ -105,28 +153,43 @@ public sealed class OrderDomainTests
     }
 
     [Fact]
-    public void ActualShippingFeeCanBeChangedOnlyBeforeCompletion()
+    public void ActualShippingFeeCanRecordIncurredAndPaidDatesAfterCompletion()
     {
         var order = CreateOrder();
 
         order.UpdateShippingFeeActual(22.125m, Baseline.AddMinutes(1), null, "tester");
         Assert.Equal(22.13m, order.ShippingFeeActual);
 
-        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(2), null, "tester");
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(2), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(3), null, "tester");
         order.UpdateShippingFeeActual(30m, Baseline.AddMinutes(3), null, "tester");
-        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(4), null, "tester");
+        order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(4), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, true, Baseline.AddMinutes(5), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(6), null, "tester");
         order.UpdateShippingFeeActual(null, Baseline.AddMinutes(5), null, "tester");
         Assert.Null(order.ShippingFeeActual);
 
-        order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(6), null, "tester");
-        Assert.Throws<DomainException>(() =>
-            order.UpdateShippingFeeActual(40m, Baseline.AddMinutes(7), null, "tester"));
+        order.ChangePaymentStatus(PaymentStatus.Paid, Baseline.AddMinutes(7), null, "tester");
+        order.ChangeStatus(OrderStatus.Delivered, true, Baseline.AddMinutes(8), null, "tester");
+        order.UpdateShippingFeeActual(
+            40m,
+            Baseline.AddMinutes(7),
+            null,
+            "tester",
+            Baseline.AddMinutes(6),
+            Baseline.AddMinutes(7),
+            PaymentMethod.Cash,
+            "shipping-test");
+        Assert.Equal(40m, order.ShippingFeeActual);
+        Assert.Equal(Baseline.AddMinutes(6), order.ShippingFeeIncurredAt);
+        Assert.Equal(Baseline.AddMinutes(7), order.ShippingFeePaidAt);
     }
 
     [Fact]
     public void CancellingReservedOrderMarksInventoryForRestore()
     {
         var order = CreateOrder();
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddSeconds(30), null, "tester");
         order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
 
         Assert.True(order.RequiresInventoryRestore(OrderStatus.Cancelled));
@@ -181,6 +244,7 @@ public sealed class OrderDomainTests
     {
         var order = CreateOrder(items: [new OrderItemSnapshot(1, "CUSTOM-01", "Made to order bouquet", null, 500, 1)]);
 
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddSeconds(30), null, "tester");
         order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(1), null, "tester");
 
         Assert.Equal(OrderStatus.Producing, order.OrderStatus);
@@ -233,14 +297,14 @@ public sealed class OrderDomainTests
     }
 
     [Fact]
-    public void Editing_paid_checkbox_recalculates_payment_status_with_zero_deposit()
+    public void Editing_paid_checkbox_does_not_invent_a_payment_transaction()
     {
         var order = CreateOrder();
         var itemId = order.Items.Single().Id;
         var item = new OrderItemUpdate(itemId, new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 100, 1));
 
         order.Update(Channel.AdminId, null, CreateDetails(), [item], Baseline.AddMinutes(1), null, "tester", true);
-        Assert.Equal(PaymentStatus.Paid, order.PaymentStatus);
+        Assert.Equal(PaymentStatus.Unpaid, order.PaymentStatus);
 
         order.Update(Channel.AdminId, null, CreateDetails(), [item], Baseline.AddMinutes(2), null, "tester", false);
         Assert.Equal(PaymentStatus.Unpaid, order.PaymentStatus);
@@ -254,13 +318,17 @@ public sealed class OrderDomainTests
         var order = CreateOrder();
         if (terminalStatus == OrderStatus.Completed)
         {
+            order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddSeconds(30), null, "tester");
             order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
-            order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(2), null, "tester");
-            order.ChangeStatus(OrderStatus.Completed, true, Baseline.AddMinutes(3), null, "tester");
+            order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(2), null, "tester");
+            order.ChangeStatus(OrderStatus.Ready, true, Baseline.AddMinutes(3), null, "tester");
+            order.ChangeStatus(OrderStatus.Shipping, true, Baseline.AddMinutes(4), null, "tester");
+            order.ChangePaymentStatus(PaymentStatus.Paid, Baseline.AddMinutes(5), null, "tester");
+            order.ChangeStatus(OrderStatus.Delivered, true, Baseline.AddMinutes(6), null, "tester");
         }
         else
         {
-            order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(1), null, "tester");
+            order.ChangeStatus(OrderStatus.Cancelled, false, Baseline.AddMinutes(1), null, "tester", "Khách hủy");
         }
 
         var exception = Assert.Throws<DomainException>(() => order.Update(
@@ -298,6 +366,7 @@ public sealed class OrderDomainTests
     public void ReservedOrderCannotBeEdited()
     {
         var order = CreateOrder();
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddSeconds(30), null, "tester");
         order.ChangeStatus(OrderStatus.Producing, true, Baseline.AddMinutes(1), null, "tester");
 
         Assert.Throws<DomainException>(() => order.Update(
@@ -471,8 +540,8 @@ public sealed class OrderDomainTests
 
         var optionalContact = CreateDetails() with
         {
-            OrdererName = string.Empty,
-            OrdererPhone = string.Empty,
+            OrdererName = "Người đặt",
+            OrdererPhone = "0900000000",
             RecipientName = string.Empty,
             RecipientPhone = string.Empty,
             SenderName = "Người gửi",
@@ -490,10 +559,10 @@ public sealed class OrderDomainTests
             null,
             "tester");
 
-        Assert.Empty(optionalContactOrder.OrdererPhone);
-        Assert.Empty(optionalContactOrder.OrdererName);
-        Assert.Empty(optionalContactOrder.RecipientName);
-        Assert.Empty(optionalContactOrder.RecipientPhone);
+        Assert.Equal("0900000000", optionalContactOrder.OrdererPhone);
+        Assert.Equal("Người đặt", optionalContactOrder.OrdererName);
+        Assert.Null(optionalContactOrder.RecipientName);
+        Assert.Null(optionalContactOrder.RecipientPhone);
         Assert.Equal("Người gửi", optionalContactOrder.SenderName);
         Assert.Null(optionalContactOrder.DeliveryAddress);
         Assert.Equal(optionalContact.DeliveryToUtc, optionalContactOrder.DeliveryTo);
@@ -580,16 +649,69 @@ public sealed class OrderDomainTests
             index.Properties.Select(property => property.Name).SequenceEqual([nameof(OrderImage.OrderItemId)]));
     }
 
+    [Fact]
+    public void RecipientMayBeMissingUntilDispatchButServerBlocksHandover()
+    {
+        var order = CreateOrder(details: CreateDetails() with { RecipientName = null, RecipientPhone = null, DeliveryAddress = null });
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(2), null, "tester");
+        order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, false, Baseline.AddMinutes(4), null, "tester");
+        Assert.Throws<DomainException>(() => order.ChangeStatus(OrderStatus.Shipping, false, Baseline.AddMinutes(5), null, "tester"));
+
+        order.UpdateRecipient("Người nhận", "0909000000", "123 Flower Street", Baseline.AddMinutes(6), null, "tester");
+        order.ChangeStatus(OrderStatus.Shipping, false, Baseline.AddMinutes(7), null, "tester");
+        Assert.Equal(OrderStatus.Shipping, order.OrderStatus);
+    }
+
+    [Fact]
+    public void PickupSkipsShipperAndCompletesOnlyAfterReceiptAndFullPayment()
+    {
+        var order = CreateOrder(details: CreateDetails() with
+        {
+            PickupAtShop = true,
+            RecipientName = null,
+            RecipientPhone = null,
+            DeliveryAddress = null,
+            DeliveryLatitude = null,
+            DeliveryLongitude = null
+        });
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(1), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(2), null, "tester");
+        order.UpdateChecklist(true, true, true, true, Baseline.AddMinutes(3), null, "tester");
+        order.ChangeStatus(OrderStatus.Ready, false, Baseline.AddMinutes(4), null, "tester");
+        Assert.Throws<DomainException>(() => order.ChangeStatus(OrderStatus.Shipping, false, Baseline.AddMinutes(5), null, "tester"));
+        order.ChangePaymentStatus(PaymentStatus.Paid, Baseline.AddMinutes(5), null, "tester");
+        order.ChangeStatus(OrderStatus.Delivered, false, Baseline.AddMinutes(6), null, "tester");
+        Assert.Equal(OrderStatus.Completed, order.OrderStatus);
+        Assert.Equal(Baseline.AddMinutes(6), order.CompletedAt);
+    }
+
+    [Fact]
+    public void HoldBlocksForwardProgressAndActualShippingZeroIsPreserved()
+    {
+        var order = CreateOrder();
+        order.ChangeStatus(OrderStatus.Confirmed, false, Baseline.AddMinutes(1), null, "tester");
+        order.Hold("Chờ khách chốt mẫu", Baseline.AddMinutes(2), null, "tester");
+        Assert.Throws<DomainException>(() => order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(3), null, "tester"));
+        order.Resume(Baseline.AddMinutes(4), null, "tester");
+        order.ChangeStatus(OrderStatus.Producing, false, Baseline.AddMinutes(5), null, "tester");
+        order.UpdateShippingFeeActual(0, Baseline.AddMinutes(6), null, "tester");
+        Assert.Equal(0, order.ShippingFeeActual);
+        Assert.Null(order.HoldReason);
+    }
+
     private static Order CreateOrder(
         decimal deposit = 0,
         decimal shipping = 10,
         IEnumerable<OrderItemSnapshot>? items = null,
-        bool isPaid = false) =>
+        bool isPaid = false,
+        OrderDetails? details = null) =>
         new(
             "ORD-20260728-ABC123",
             Channel.AdminId,
             null,
-            CreateDetails() with { DepositAmount = deposit, ShippingFee = shipping },
+            (details ?? CreateDetails()) with { DepositAmount = deposit, ShippingFee = shipping },
             items ?? [new OrderItemSnapshot(1, "ROSE-01", "Rose bouquet", null, 100, 1)],
             Baseline,
             null,
